@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.patent.mapper.PatentMapper">
+
+    <!-- 分页查询专利列表 -->
+    <select id="selectPatentPage" resultType="com.patent.model.vo.PatentListVO">
+        SELECT
+            id,
+            publication_no AS publicationNo,
+            title,
+            applicant,
+            `abstract` AS patentAbstract,
+            publication_date AS publicationDate,
+            source_type AS sourceType,
+            parse_status AS parseStatus,
+            created_at AS createdAt
+        FROM patent
+        <where>
+            <if test="parseStatus != null and parseStatus != ''">
+                AND parse_status = #{parseStatus}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (title LIKE CONCAT('%', #{keyword}, '%')
+                     OR publication_no LIKE CONCAT('%', #{keyword}, '%')
+                     OR applicant LIKE CONCAT('%', #{keyword}, '%')
+                     OR `abstract` LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="userId != null">
+                AND created_by = #{userId}
+            </if>
+        </where>
+        ORDER BY created_at DESC
+    </select>
+
+    <!-- 高级检索专利 -->
+    <select id="selectPatentAdvanced" resultType="com.patent.model.vo.PatentListVO">
+        SELECT DISTINCT
+            p.id,
+            p.publication_no AS publicationNo,
+            p.title,
+            p.applicant,
+            p.`abstract` AS patentAbstract,
+            p.publication_date AS publicationDate,
+            p.source_type AS sourceType,
+            p.parse_status AS parseStatus,
+            p.created_at AS createdAt
+        FROM patent p
+        <if test="domainCode != null and domainCode != ''">
+            LEFT JOIN patent_domain pd ON p.id = pd.patent_id
+        </if>
+        <if test="entityType != null and entityType != ''">
+            LEFT JOIN patent_entity pe ON p.id = pe.patent_id
+        </if>
+        <where>
+            <if test="title != null and title != ''">
+                AND p.title LIKE CONCAT('%', #{title}, '%')
+            </if>
+            <if test="abstractKeyword != null and abstractKeyword != ''">
+                AND p.`abstract` LIKE CONCAT('%', #{abstractKeyword}, '%')
+            </if>
+            <if test="applicant != null and applicant != ''">
+                AND p.applicant LIKE CONCAT('%', #{applicant}, '%')
+            </if>
+            <if test="domainCode != null and domainCode != ''">
+                AND pd.domain_code LIKE CONCAT(#{domainCode}, '%')
+            </if>
+            <if test="entityType != null and entityType != ''">
+                AND pe.entity_type = #{entityType}
+            </if>
+        </where>
+        ORDER BY p.created_at DESC
+    </select>
+
+</mapper>

@@ -1,0 +1,79 @@
+# ==================== Java / Maven ====================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+*.ctxt
+.mtj.tmp/
+hs_err_pid*
+
+# ==================== IDE ====================
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# VSCode
+.vscode/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# ==================== Node.js / Frontend ====================
+node_modules/
+dist/
+dist-ssr/
+*.local
+.pnp
+.pnp.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==================== Environment ====================
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ==================== OS ====================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ==================== Python ====================
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.venv/
+venv/
+
+# ==================== Build & Cache ====================
+*.tsbuildinfo
+.cache/
+.temp/
+.tmp/
+
+# ==================== Data Files ====================
+# 大型数据文件（不上传到仓库）
+*.csv
+!专利导入模板.csv
+
+# PDF 文件
+*.pdf
+
+# ==================== Cursor Skills ====================
+.cursor/skills/

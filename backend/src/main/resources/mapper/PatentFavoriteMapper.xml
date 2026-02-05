@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.patent.mapper.PatentFavoriteMapper">
+
+    <!-- 分页查询用户收藏的专利列表 -->
+    <select id="selectFavoritePatentPage" resultType="com.patent.model.vo.PatentListVO">
+        SELECT
+            p.id,
+            p.publication_no AS publicationNo,
+            p.title,
+            p.applicant,
+            p.`abstract` AS patentAbstract,
+            p.publication_date AS publicationDate,
+            p.source_type AS sourceType,
+            p.parse_status AS parseStatus,
+            p.created_at AS createdAt,
+            f.remark AS favoriteRemark,
+            f.group_name AS favoriteGroup,
+            f.created_at AS favoriteTime
+        FROM patent_favorite f
+        INNER JOIN patent p ON f.patent_id = p.id
+        <where>
+            f.user_id = #{userId}
+            <if test="keyword != null and keyword != ''">
+                AND (p.title LIKE CONCAT('%', #{keyword}, '%')
+                     OR p.publication_no LIKE CONCAT('%', #{keyword}, '%')
+                     OR p.applicant LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="groupName != null and groupName != ''">
+                AND f.group_name = #{groupName}
+            </if>
+        </where>
+        ORDER BY f.created_at DESC
+    </select>
+
+</mapper>

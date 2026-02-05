@@ -1,0 +1,45 @@
+# 开发环境配置
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/patent_match_system?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 280054
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+    elasticsearch:
+      uris: http://192.168.65.131:9200
+
+  ai:
+    openai:
+      api-key: ${DASH_SCOPE_API_KEY:}
+      # 增加超时配置
+      connect-timeout: 60s
+      read-timeout: 180s
+    ollama:
+      base-url: http://localhost:11434
+    vectorstore:
+      qdrant:
+        host: 192.168.65.131
+        port: 6334
+
+minio:
+  endpoint: http://192.168.65.131:9000
+  access-key: admin
+  secret-key: admin280054
+  bucket-name: patent-files
+
+patent:
+  llm-mode: online
+
+# 开发环境显示SQL
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+logging:
+  level:
+    com.patent: DEBUG

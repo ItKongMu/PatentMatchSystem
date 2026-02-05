@@ -1,0 +1,182 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: patent-match-system
+
+  # 多环境配置
+  profiles:
+    active: dev
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+
+  # MySQL配置
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/patent_match_system?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:280054}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      auto-commit: true
+      idle-timeout: 30000
+      pool-name: PatentHikariCP
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+  # Redis配置
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 10000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-wait: -1ms
+          max-idle: 8
+          min-idle: 0
+
+    # Elasticsearch配置
+    elasticsearch:
+      uris: ${ES_URIS:http://192.168.65.131:9200}
+
+    # MongoDB配置（聊天历史存储）
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/patent_chat}
+      # 或使用详细配置
+      # host: ${MONGODB_HOST:localhost}
+      # port: ${MONGODB_PORT:27017}
+      # database: ${MONGODB_DATABASE:patent_chat}
+      # username: ${MONGODB_USERNAME:}
+      # password: ${MONGODB_PASSWORD:}
+      # authentication-database: admin
+
+  # Spring AI配置
+  ai:
+    # 通义千问配置（在线模式）- 使用 OpenAI 兼容接口
+    openai:
+      # DashScope OpenAI 兼容接口地址（不含 /v1，因为 Spring AI 会自动添加）
+      base-url: ${DASH_SCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      api-key: ${DASH_SCOPE_API_KEY}
+      # 连接和读取超时配置
+      connect-timeout: 60s
+      read-timeout: 120s
+      chat:
+        options:
+          model: ${DASH_SCOPE_CHAT_MODEL:qwen-plus}
+          temperature: 0.7
+      embedding:
+        options:
+          model: ${DASH_SCOPE_EMBEDDING_MODEL:text-embedding-v3}
+
+    # Ollama配置（离线模式）
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: qwen2.5:7b
+          temperature: 0.7
+      embedding:
+        options:
+          model: nomic-embed-text
+
+    # Qdrant向量存储
+    vectorstore:
+      qdrant:
+        host: ${QDRANT_HOST:192.168.65.131}
+        port: ${QDRANT_PORT:6334}
+        api-key: ${QDRANT_API_KEY}
+        collection-name: patent
+        initialize-schema: true
+    
+    # 重试配置
+    retry:
+      max-attempts: 3
+      backoff:
+        initial-interval: 1000
+        multiplier: 2
+        max-interval: 10000
+
+# MyBatis-Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.patent.model.entity
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# Sa-Token配置
+sa-token:
+  token-name: Authorization
+  timeout: 86400
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: true
+
+# MinIO配置
+minio:
+  endpoint: ${MINIO_ENDPOINT:192.168.65.131:9000}
+  access-key: ${MINIO_ACCESS_KEY:admin}
+  secret-key: ${MINIO_SECRET_KEY:admin280054}
+  bucket-name: ${MINIO_BUCKET:patent-files}
+
+# 自定义配置
+patent:
+  # LLM模式: online-通义千问 / offline-Ollama
+  # 默认使用offline模式，避免没有API Key时启动失败
+  llm-mode: ${LLM_MODE:online}
+  # 注意: online模式需要设置 DASH_SCOPE_API_KEY 环境变量
+  # 匹配结果数量
+  match-top-k: 10
+  # 相似度阈值
+  similarity-threshold: 0.6
+  # 向量维度 (text-embedding-v3 默认1024, nomic-embed-text 默认768)
+  # 默认使用768（Ollama nomic-embed-text），online模式请设置为1024
+  vector-dimension: ${VECTOR_DIMENSION:1024}
+
+# Knife4j API文档配置
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: '专利匹配系统API'
+      paths-to-match: '/**'
+      packages-to-scan: com.patent.controller
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    swagger-model-name: 实体类列表
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.patent: DEBUG
+    org.springframework.ai: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
