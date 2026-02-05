@@ -198,17 +198,40 @@
               class="form-input"
             />
           </el-form-item>
+
+          <el-form-item label="IPC分类号" prop="ipcClassification">
+            <el-input
+              v-model="textForm.ipcClassification"
+              placeholder="如：G06F 16/30, G06N 3/08（多个用逗号分隔）"
+              class="form-input"
+            />
+            <div class="form-hint">IPC国际专利分类号，用于领域归类</div>
+          </el-form-item>
           
           <el-form-item label="专利摘要" prop="patentAbstract">
             <el-input
               v-model="textForm.patentAbstract"
               type="textarea"
-              :rows="8"
+              :rows="6"
               placeholder="请输入专利摘要内容，建议50字以上以保证实体提取效果..."
               class="form-textarea"
             />
             <div class="form-counter">
               {{ textForm.patentAbstract.length }} / 5000 字符
+            </div>
+          </el-form-item>
+
+          <el-form-item label="专利正文（可选）" prop="fullText">
+            <el-input
+              v-model="textForm.fullText"
+              type="textarea"
+              :rows="10"
+              placeholder="请输入专利正文内容，包括技术领域、背景技术、发明内容等（如有则用于深度分析）..."
+              class="form-textarea"
+            />
+            <div class="form-counter-group">
+              <span class="form-hint">如提供正文，系统将存入MinIO用于向量化和深度分析</span>
+              <span class="form-counter">{{ textForm.fullText.length }} 字符</span>
             </div>
           </el-form-item>
           
@@ -269,6 +292,21 @@ const activeTab = ref('file')
 const uploading = ref(false)
 const submitting = ref(false)
 
+// 常量定义 - 与后端保持一致
+const FILE_CONSTANTS = {
+  MAX_FILE_SIZE: 50 * 1024 * 1024, // 50MB
+  ALLOWED_FILE_TYPE: 'application/pdf',
+  ALLOWED_EXTENSIONS: ['.pdf'],
+  TITLE_MIN_LENGTH: 5,
+  TITLE_MAX_LENGTH: 200,
+  ABSTRACT_MIN_LENGTH: 50,
+  ABSTRACT_MAX_LENGTH: 5000,
+  FULL_TEXT_MAX_LENGTH: 100000,
+  APPLICANT_MAX_LENGTH: 200,
+  IPC_MAX_LENGTH: 500,
+  PUBLICATION_NO_PATTERN: /^[A-Z]{2}\d+[A-Z]?\d*$/
+}
+
 // PDF上传表单
 const fileFormRef = ref(null)
 const uploadRef = ref(null)
@@ -279,7 +317,11 @@ const fileForm = reactive({
 
 const fileRules = {
   publicationNo: [
-    { pattern: /^[A-Z]{2}\d+[A-Z]?\d*$/, message: '公开号格式不正确', trigger: 'blur' }
+    { 
+      pattern: FILE_CONSTANTS.PUBLICATION_NO_PATTERN, 
+      message: '公开号格式不正确，示例：CN123456789A', 
+      trigger: 'blur' 
+    }
   ]
 }
 
@@ -290,28 +332,97 @@ const textForm = reactive({
   title: '',
   applicant: '',
   publicationDate: '',
-  patentAbstract: ''
+  ipcClassification: '',
+  patentAbstract: '',
+  fullText: ''
 })
 
 const textRules = {
+  publicationNo: [
+    { 
+      pattern: FILE_CONSTANTS.PUBLICATION_NO_PATTERN, 
+      message: '公开号格式不正确，示例：CN123456789A', 
+      trigger: 'blur' 
+    }
+  ],
   title: [
     { required: true, message: '请输入专利标题', trigger: 'blur' },
-    { min: 5, max: 200, message: '标题长度在5到200个字符', trigger: 'blur' }
+    { 
+      min: FILE_CONSTANTS.TITLE_MIN_LENGTH, 
+      max: FILE_CONSTANTS.TITLE_MAX_LENGTH, 
+      message: `标题长度应在${FILE_CONSTANTS.TITLE_MIN_LENGTH}-${FILE_CONSTANTS.TITLE_MAX_LENGTH}个字符之间`, 
+      trigger: 'blur' 
+    }
+  ],
+  applicant: [
+    { 
+      max: FILE_CONSTANTS.APPLICANT_MAX_LENGTH, 
+      message: `申请人长度不能超过${FILE_CONSTANTS.APPLICANT_MAX_LENGTH}个字符`, 
+      trigger: 'blur' 
+    }
+  ],
+  ipcClassification: [
+    { 
+      max: FILE_CONSTANTS.IPC_MAX_LENGTH, 
+      message: `IPC分类号长度不能超过${FILE_CONSTANTS.IPC_MAX_LENGTH}个字符`, 
+      trigger: 'blur' 
+    }
   ],
   patentAbstract: [
     { required: true, message: '请输入专利摘要', trigger: 'blur' },
-    { min: 50, max: 5000, message: '摘要长度在50到5000个字符', trigger: 'blur' }
+    { 
+      min: FILE_CONSTANTS.ABSTRACT_MIN_LENGTH, 
+      max: FILE_CONSTANTS.ABSTRACT_MAX_LENGTH, 
+      message: `摘要长度应在${FILE_CONSTANTS.ABSTRACT_MIN_LENGTH}-${FILE_CONSTANTS.ABSTRACT_MAX_LENGTH}个字符之间`, 
+      trigger: 'blur' 
+    }
+  ],
+  fullText: [
+    { 
+      max: FILE_CONSTANTS.FULL_TEXT_MAX_LENGTH, 
+      message: `正文长度不能超过${FILE_CONSTANTS.FULL_TEXT_MAX_LENGTH / 10000}万个字符`, 
+      trigger: 'blur' 
+    }
   ]
 }
 
-const handleFileChange = (file) => {
-  if (file.raw.type !== 'application/pdf') {
+/**
+ * 验证上传文件
+ * @param {File} file - 文件对象
+ * @returns {boolean} - 是否有效
+ */
+const validateFile = (file) => {
+  // 验证文件类型
+  if (file.type !== FILE_CONSTANTS.ALLOWED_FILE_TYPE) {
     ElMessage.error('只能上传PDF文件')
-    uploadRef.value?.clearFiles()
-    return
+    return false
   }
-  if (file.raw.size > 50 * 1024 * 1024) {
-    ElMessage.error('文件大小不能超过50MB')
+  
+  // 验证文件扩展名
+  const fileName = file.name.toLowerCase()
+  const hasValidExtension = FILE_CONSTANTS.ALLOWED_EXTENSIONS.some(ext => fileName.endsWith(ext))
+  if (!hasValidExtension) {
+    ElMessage.error('只支持.pdf格式的文件')
+    return false
+  }
+  
+  // 验证文件大小
+  if (file.size > FILE_CONSTANTS.MAX_FILE_SIZE) {
+    ElMessage.error(`文件大小不能超过${FILE_CONSTANTS.MAX_FILE_SIZE / 1024 / 1024}MB`)
+    return false
+  }
+  
+  // 验证文件是否为空
+  if (file.size === 0) {
+    ElMessage.error('文件内容为空，请选择有效的PDF文件')
+    return false
+  }
+  
+  return true
+}
+
+const handleFileChange = (file) => {
+  if (!validateFile(file.raw)) {
     uploadRef.value?.clearFiles()
     return
   }
@@ -332,16 +443,23 @@ const handleUpload = async () => {
     return
   }
   
+  // 验证公开号格式（如果填写）
+  if (fileForm.publicationNo && !FILE_CONSTANTS.PUBLICATION_NO_PATTERN.test(fileForm.publicationNo)) {
+    ElMessage.error('公开号格式不正确，示例：CN123456789A')
+    return
+  }
+  
   uploading.value = true
   try {
     const formData = new FormData()
     formData.append('file', fileForm.file)
     if (fileForm.publicationNo) {
-      formData.append('publicationNo', fileForm.publicationNo)
+      formData.append('publicationNo', fileForm.publicationNo.trim())
     }
     
     const uploadRes = await patentApi.upload(formData)
     if (uploadRes.code !== 200) {
+      ElMessage.error(uploadRes.message || '上传失败')
       return
     }
     
@@ -352,9 +470,13 @@ const handleUpload = async () => {
       ElMessage.success('上传成功，正在处理中...')
       resetFileForm()
       router.push({ path: '/patent/list', query: { polling: 'true' } })
+    } else {
+      ElMessage.warning(processRes.message || '处理任务提交失败，请稍后重试')
     }
   } catch (error) {
     console.error('上传处理失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '上传处理失败，请检查网络连接'
+    ElMessage.error(errorMsg)
   } finally {
     uploading.value = false
   }
@@ -368,8 +490,20 @@ const handleTextSubmit = async () => {
     
     submitting.value = true
     try {
-      const createRes = await patentApi.createByText(textForm)
+      // 构建请求数据，清理空白字符
+      const requestData = {
+        ...textForm,
+        title: textForm.title?.trim(),
+        applicant: textForm.applicant?.trim(),
+        publicationNo: textForm.publicationNo?.trim(),
+        ipcClassification: textForm.ipcClassification?.trim(),
+        patentAbstract: textForm.patentAbstract?.trim(),
+        fullText: textForm.fullText?.trim()
+      }
+      
+      const createRes = await patentApi.createByText(requestData)
       if (createRes.code !== 200) {
+        ElMessage.error(createRes.message || '录入失败')
         return
       }
       
@@ -380,9 +514,13 @@ const handleTextSubmit = async () => {
         ElMessage.success('提交成功，正在处理中...')
         resetTextForm()
         router.push({ path: '/patent/list', query: { polling: 'true' } })
+      } else {
+        ElMessage.warning(processRes.message || '处理任务提交失败，请稍后重试')
       }
     } catch (error) {
       console.error('提交处理失败:', error)
+      const errorMsg = error.response?.data?.message || error.message || '提交处理失败，请检查网络连接'
+      ElMessage.error(errorMsg)
     } finally {
       submitting.value = false
     }
@@ -569,6 +707,21 @@ const resetTextForm = () => {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-align: right;
+}
+
+.form-counter-group {
+  margin-top: var(--space-2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  
+  .form-hint {
+    margin-top: 0;
+  }
+  
+  .form-counter {
+    margin-top: 0;
+  }
 }
 
 .form-actions {

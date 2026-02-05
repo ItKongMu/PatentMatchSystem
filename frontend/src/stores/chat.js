@@ -237,6 +237,20 @@ export const useChatStore = defineStore('chat', () => {
   async function initialize() {
     const restored = loadFromStorage()
     
+    // 检查是否已登录
+    const token = localStorage.getItem('token')
+    if (!token) {
+      // 未登录，使用默认建议，不调用 API
+      if (!suggestions.value.length) {
+        suggestions.value = [
+          '帮我搜索关于深度学习的专利',
+          '查找图像识别相关的技术方案',
+          '统计一下人工智能专利的领域分布'
+        ]
+      }
+      return restored
+    }
+    
     // 如果没有恢复到建议，则加载新的建议
     if (!suggestions.value.length) {
       try {
@@ -267,6 +281,13 @@ export const useChatStore = defineStore('chat', () => {
    * 获取用户会话列表
    */
   async function fetchSessions(page = 1, size = 20) {
+    // 检查是否已登录，避免未登录时触发 401 错误
+    const token = localStorage.getItem('token')
+    if (!token) {
+      sessions.value = []
+      return
+    }
+    
     sessionsLoading.value = true
     try {
       const res = await chatApi.getSessions({ page, size })
@@ -275,10 +296,8 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (error) {
       console.error('获取会话列表失败:', error)
-      // 如果是401未登录，清空会话列表
-      if (error?.response?.status === 401) {
-        sessions.value = []
-      }
+      // 清空会话列表
+      sessions.value = []
     } finally {
       sessionsLoading.value = false
     }

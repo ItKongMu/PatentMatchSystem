@@ -19,6 +19,16 @@ public interface FileService {
     String uploadFile(MultipartFile file, String objectName);
 
     /**
+     * 上传字节数组
+     *
+     * @param bytes       字节数组
+     * @param objectName  对象名称（路径）
+     * @param contentType 内容类型
+     * @return 文件路径
+     */
+    String uploadBytes(byte[] bytes, String objectName, String contentType);
+
+    /**
      * 获取文件流
      *
      * @param objectName 对象名称

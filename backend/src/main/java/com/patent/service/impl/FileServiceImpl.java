@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.concurrent.TimeUnit;
 
@@ -43,6 +44,31 @@ public class FileServiceImpl implements FileService {
 
         } catch (Exception e) {
             log.error("文件上传失败: {}", objectName, e);
+            throw new BusinessException("文件上传失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public String uploadBytes(byte[] bytes, String objectName, String contentType) {
+        try {
+            // 确保bucket存在
+            ensureBucketExists();
+
+            // 上传字节数组
+            try (ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes)) {
+                minioClient.putObject(PutObjectArgs.builder()
+                        .bucket(minioConfig.getBucketName())
+                        .object(objectName)
+                        .stream(inputStream, bytes.length, -1)
+                        .contentType(contentType)
+                        .build());
+            }
+
+            log.info("字节数组上传成功: {}", objectName);
+            return objectName;
+
+        } catch (Exception e) {
+            log.error("字节数组上传失败: {}", objectName, e);
             throw new BusinessException("文件上传失败: " + e.getMessage());
         }
     }

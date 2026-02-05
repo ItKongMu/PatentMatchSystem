@@ -129,6 +129,75 @@ public class VectorServiceImpl implements VectorService {
         }
     }
 
+    @Override
+    public Map<Long, String> batchStorePatentVectors(List<PatentVectorData> patentDataList) {
+        if (patentDataList == null || patentDataList.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, String> resultMap = new HashMap<>();
+        List<Document> documents = new java.util.ArrayList<>();
+
+        try {
+            for (PatentVectorData data : patentDataList) {
+                Patent patent = data.patent();
+                List<PatentEntity> entities = data.entities();
+                List<PatentDomain> domains = data.domains();
+
+                // 构造增强文本
+                List<String> entityNames = entities.stream()
+                        .map(PatentEntity::getEntityName)
+                        .toList();
+                List<String> entityTypes = entities.stream()
+                        .map(PatentEntity::getEntityType)
+                        .distinct()
+                        .toList();
+
+                String enhancedText = String.format(
+                        "标题：%s\n摘要：%s\n关键技术：%s",
+                        patent.getTitle(),
+                        patent.getPatentAbstract() != null ? patent.getPatentAbstract() : "",
+                        String.join("、", entityNames)
+                );
+
+                // 获取领域信息
+                String domainSection = domains.stream()
+                        .filter(d -> d.getDomainLevel() == 1)
+                        .map(PatentDomain::getDomainCode)
+                        .findFirst().orElse("");
+                List<String> domainCodes = domains.stream()
+                        .map(PatentDomain::getDomainCode)
+                        .toList();
+
+                // 创建Document对象
+                String vectorId = UUID.randomUUID().toString();
+                Map<String, Object> metadata = new HashMap<>();
+                metadata.put("patent_id", patent.getId());
+                metadata.put("publication_no", patent.getPublicationNo() != null ? patent.getPublicationNo() : "");
+                metadata.put("title", patent.getTitle());
+                metadata.put("applicant", patent.getApplicant() != null ? patent.getApplicant() : "");
+                metadata.put("domain_section", domainSection);
+                metadata.put("domain_codes", String.join(",", domainCodes));
+                metadata.put("entities", String.join(",", entityNames));
+                metadata.put("entity_types", String.join(",", entityTypes));
+                metadata.put("embedding_model", getEmbeddingModelName());
+
+                documents.add(new Document(vectorId, enhancedText, metadata));
+                resultMap.put(patent.getId(), vectorId);
+            }
+
+            // 批量存储到Qdrant
+            vectorStore.add(documents);
+            log.info("批量向量存储成功, 数量: {}", documents.size());
+
+            return resultMap;
+
+        } catch (Exception e) {
+            log.error("批量向量存储失败, 数量: {}", patentDataList.size(), e);
+            throw new RuntimeException("批量向量存储失败: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * 获取当前使用的嵌入模型名称
      */

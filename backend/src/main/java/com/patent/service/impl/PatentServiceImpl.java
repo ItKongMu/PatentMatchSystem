@@ -102,17 +102,65 @@ public class PatentServiceImpl implements PatentService {
         patent.setSourceType("TEXT");
         patent.setParseStatus("PENDING");
         patent.setCreatedBy(getCurrentUserId());
+
+        // 如果有正文或IPC分类，生成文本文件存入MinIO
+        if ((dto.getFullText() != null && !dto.getFullText().trim().isEmpty()) ||
+            (dto.getIpcClassification() != null && !dto.getIpcClassification().trim().isEmpty())) {
+            String filePath = generateAndStoreTextFile(dto, patent);
+            patent.setFilePath(filePath);
+        }
+
         patentMapper.insert(patent);
 
-        log.info("专利文本录入成功, id: {}, title: {}", patent.getId(), dto.getTitle());
+        // 如果有IPC分类，保存到patent_domain表
+        if (dto.getIpcClassification() != null && !dto.getIpcClassification().trim().isEmpty()) {
+            saveIpcClassification(patent.getId(), dto.getIpcClassification());
+        }
+
+        log.info("专利文本录入成功, id: {}, title: {}, hasFullText: {}", 
+                patent.getId(), dto.getTitle(), dto.getFullText() != null && !dto.getFullText().isEmpty());
 
         // 构建响应
         UploadResultVO result = new UploadResultVO();
         result.setPatentId(patent.getId());
+        result.setFilePath(patent.getFilePath());
         result.setParseStatus("PENDING");
         result.setMessage("录入成功，等待处理");
 
         return result;
+    }
+
+    /**
+     * 生成结构化文本文件并存入MinIO（用于TEXT录入）
+     */
+    private String generateAndStoreTextFile(PatentTextDTO dto, Patent patent) {
+        StringBuilder content = new StringBuilder();
+        content.append("专利名称：").append(dto.getTitle() != null ? dto.getTitle() : "").append("\n");
+        content.append("公开号：").append(dto.getPublicationNo() != null ? dto.getPublicationNo() : "").append("\n");
+        content.append("公开日期：").append(dto.getPublicationDate() != null ? dto.getPublicationDate().toString() : "").append("\n");
+        content.append("申请人：").append(dto.getApplicant() != null ? dto.getApplicant() : "").append("\n");
+        
+        if (dto.getIpcClassification() != null && !dto.getIpcClassification().trim().isEmpty()) {
+            content.append("IPC分类：").append(dto.getIpcClassification()).append("\n");
+        }
+        
+        content.append("\n摘要：\n");
+        content.append(dto.getPatentAbstract() != null ? dto.getPatentAbstract() : "").append("\n");
+        
+        if (dto.getFullText() != null && !dto.getFullText().trim().isEmpty()) {
+            content.append("\n专利正文\n");
+            content.append(dto.getFullText()).append("\n");
+        }
+
+        // 生成唯一文件名
+        String objectName = String.format("patents/text_%s.txt", IdUtil.fastSimpleUUID());
+
+        // 上传到MinIO
+        byte[] bytes = content.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        fileService.uploadBytes(bytes, objectName, "text/plain; charset=utf-8");
+
+        log.info("TEXT专利文本文件生成并上传成功: {}", objectName);
+        return objectName;
     }
 
     @Override
@@ -250,7 +298,7 @@ public class PatentServiceImpl implements PatentService {
         result.setPreviewData(allData.subList(0, previewSize));
         
         // 设置表头
-        result.setHeaders(Arrays.asList("公开号", "标题", "申请人", "公开日期", "摘要"));
+        result.setHeaders(Arrays.asList("公开号", "标题", "申请人", "公开日期", "IPC分类", "摘要", "正文"));
         
         // 设置消息
         if (invalidCount > 0) {
@@ -324,17 +372,20 @@ public class PatentServiceImpl implements PatentService {
                     }
                 }
 
-                patentMapper.insert(patent);
-                result.addSuccess(patent.getId());
-
-                // 如果需要自动处理
-                if (autoProcess) {
-                    try {
-                        patentProcessorService.processPatentAsync(patent.getId());
-                    } catch (Exception e) {
-                        log.warn("自动处理专利{}失败: {}", patent.getId(), e.getMessage());
-                    }
+                // 如果有正文，生成文本文件存入MinIO
+                if (dto.getFullText() != null && !dto.getFullText().trim().isEmpty()) {
+                    String filePath = generateAndStorePatentTextFile(dto, patent);
+                    patent.setFilePath(filePath);
                 }
+
+                patentMapper.insert(patent);
+                
+                // 保存IPC分类到PatentDomain表
+                if (dto.getIpcClassification() != null && !dto.getIpcClassification().trim().isEmpty()) {
+                    saveIpcClassification(patent.getId(), dto.getIpcClassification().trim());
+                }
+                
+                result.addSuccess(patent.getId());
             } catch (Exception e) {
                 log.error("导入专利失败: {}", dto, e);
                 dto.setErrorMessage("导入失败：" + e.getMessage());
@@ -343,9 +394,143 @@ public class PatentServiceImpl implements PatentService {
             }
         }
 
+        // 如果需要自动处理，使用批处理方式提高效率
+        if (autoProcess && !result.getImportedPatentIds().isEmpty()) {
+            try {
+                // 使用批处理方式处理（批次大小默认20）
+                int batchSize = Math.min(20, result.getImportedPatentIds().size());
+                patentProcessorService.batchProcessPatentsAsync(result.getImportedPatentIds(), batchSize);
+                log.info("已提交批量处理任务, 数量: {}, 批次大小: {}", result.getImportedPatentIds().size(), batchSize);
+            } catch (Exception e) {
+                log.warn("提交批量处理任务失败，降级为逐个处理: {}", e.getMessage());
+                // 降级为逐个处理
+                for (Long patentId : result.getImportedPatentIds()) {
+                    try {
+                        patentProcessorService.processPatentAsync(patentId);
+                    } catch (Exception ex) {
+                        log.warn("自动处理专利{}失败: {}", patentId, ex.getMessage());
+                    }
+                }
+            }
+        }
+
         result.buildMessage();
         log.info("CSV导入完成: {}", result.getMessage());
         return result;
+    }
+    
+    /**
+     * 生成专利文本文件并存入MinIO
+     * 文件格式与PDF解析后的格式一致，便于后续统一处理
+     */
+    private String generateAndStorePatentTextFile(PatentCsvDTO dto, Patent patent) {
+        StringBuilder content = new StringBuilder();
+        
+        // 构建与PDF格式一致的文本结构
+        if (dto.getTitle() != null && !dto.getTitle().trim().isEmpty()) {
+            content.append("专利名称：").append(dto.getTitle().trim()).append("\n\n");
+        }
+        if (dto.getPublicationNo() != null && !dto.getPublicationNo().trim().isEmpty()) {
+            content.append("公开号：").append(dto.getPublicationNo().trim()).append("\n");
+        }
+        if (dto.getPublicationDate() != null && !dto.getPublicationDate().trim().isEmpty()) {
+            content.append("公开日期：").append(dto.getPublicationDate().trim()).append("\n");
+        }
+        if (dto.getApplicant() != null && !dto.getApplicant().trim().isEmpty()) {
+            content.append("申请人：").append(dto.getApplicant().trim()).append("\n");
+        }
+        if (dto.getIpcClassification() != null && !dto.getIpcClassification().trim().isEmpty()) {
+            content.append("IPC分类：").append(dto.getIpcClassification().trim()).append("\n");
+        }
+        content.append("\n");
+        
+        // 摘要
+        if (dto.getPatentAbstract() != null && !dto.getPatentAbstract().trim().isEmpty()) {
+            content.append("摘要：\n").append(dto.getPatentAbstract().trim()).append("\n\n");
+        }
+        
+        // 正文
+        if (dto.getFullText() != null && !dto.getFullText().trim().isEmpty()) {
+            content.append("专利正文\n").append(dto.getFullText().trim()).append("\n");
+        }
+        
+        // 生成文件名：patents/csv_UUID.txt
+        String objectName = String.format("patents/csv_%s.txt", IdUtil.fastSimpleUUID());
+        
+        // 存入MinIO
+        try {
+            byte[] contentBytes = content.toString().getBytes(StandardCharsets.UTF_8);
+            fileService.uploadBytes(contentBytes, objectName, "text/plain; charset=utf-8");
+            log.info("CSV专利文本文件已存入MinIO: {}", objectName);
+            return objectName;
+        } catch (Exception e) {
+            log.error("存储CSV专利文本文件失败", e);
+            throw new BusinessException("存储专利文本文件失败：" + e.getMessage());
+        }
+    }
+    
+    /**
+     * 保存IPC分类到PatentDomain表
+     * @param patentId 专利ID
+     * @param ipcClassification IPC分类字符串（多个用逗号分隔）
+     */
+    private void saveIpcClassification(Long patentId, String ipcClassification) {
+        // 解析IPC分类（支持逗号、分号、空格分隔）
+        String[] ipcCodes = ipcClassification.split("[,;\\s]+");
+        
+        for (String ipcCode : ipcCodes) {
+            ipcCode = ipcCode.trim();
+            if (ipcCode.isEmpty()) {
+                continue;
+            }
+            
+            PatentDomain domain = new PatentDomain();
+            domain.setPatentId(patentId);
+            domain.setDomainCode(ipcCode);
+            
+            // 根据IPC编码长度判断层级
+            // 例如: G(部) -> G06(大类) -> G06F(小类) -> G06F16(主组) -> G06F16/30(分组)
+            int level = determineIpcLevel(ipcCode);
+            domain.setDomainLevel(level);
+            
+            // 设置领域描述（使用IPC编码本身作为描述，后续可由LLM补充）
+            domain.setDomainDesc(ipcCode);
+            
+            patentDomainMapper.insert(domain);
+        }
+    }
+    
+    /**
+     * 根据IPC编码判断层级
+     */
+    private int determineIpcLevel(String ipcCode) {
+        if (ipcCode == null || ipcCode.isEmpty()) {
+            return 1;
+        }
+        
+        // 移除空格
+        ipcCode = ipcCode.replace(" ", "");
+        
+        // 包含斜杠的是分组级别(5)或主组级别(4)
+        if (ipcCode.contains("/")) {
+            String[] parts = ipcCode.split("/");
+            if (parts.length >= 2 && parts[1].length() > 2) {
+                return 5; // 分组
+            }
+            return 4; // 主组
+        }
+        
+        // 根据长度判断
+        int len = ipcCode.length();
+        if (len == 1) {
+            return 1; // 部 (如 G)
+        } else if (len <= 3) {
+            return 2; // 大类 (如 G06)
+        } else if (len <= 4) {
+            return 3; // 小类 (如 G06F)
+        } else {
+            return 4; // 主组 (如 G06F16)
+        }
     }
 
     /**
@@ -414,7 +599,7 @@ public class PatentServiceImpl implements PatentService {
 
     /**
      * 解析CSV行
-     * 支持格式: 公开号,标题,申请人,公开日期,摘要
+     * 支持格式: 公开号,标题,申请人,公开日期,IPC分类,摘要,正文(可选)
      */
     private PatentCsvDTO parseCsvLine(String line, int rowNum) {
         PatentCsvDTO dto = new PatentCsvDTO();
@@ -423,7 +608,25 @@ public class PatentServiceImpl implements PatentService {
         // 解析CSV（支持引号包围的字段）
         List<String> fields = parseCsvFields(line);
         
-        if (fields.size() >= 5) {
+        if (fields.size() >= 7) {
+            // 完整格式：公开号,标题,申请人,公开日期,IPC分类,摘要,正文
+            dto.setPublicationNo(fields.get(0));
+            dto.setTitle(fields.get(1));
+            dto.setApplicant(fields.get(2));
+            dto.setPublicationDate(fields.get(3));
+            dto.setIpcClassification(fields.get(4));
+            dto.setPatentAbstract(fields.get(5));
+            dto.setFullText(fields.get(6));
+        } else if (fields.size() == 6) {
+            // 6列格式：公开号,标题,申请人,公开日期,IPC分类,摘要（无正文）
+            dto.setPublicationNo(fields.get(0));
+            dto.setTitle(fields.get(1));
+            dto.setApplicant(fields.get(2));
+            dto.setPublicationDate(fields.get(3));
+            dto.setIpcClassification(fields.get(4));
+            dto.setPatentAbstract(fields.get(5));
+        } else if (fields.size() == 5) {
+            // 旧格式兼容：公开号,标题,申请人,公开日期,摘要（无IPC分类）
             dto.setPublicationNo(fields.get(0));
             dto.setTitle(fields.get(1));
             dto.setApplicant(fields.get(2));

@@ -82,6 +82,14 @@ public interface SearchService {
     void syncPatentToEs(Long patentId);
 
     /**
+     * 批量同步专利到ES索引
+     *
+     * @param patentIds 专利ID列表
+     * @return 成功同步的数量
+     */
+    int batchSyncPatentsToEs(java.util.List<Long> patentIds);
+
+    /**
      * 从ES删除专利
      *
      * @param patentId 专利ID

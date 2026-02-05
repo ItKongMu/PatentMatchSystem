@@ -591,6 +591,72 @@ public class SearchServiceImpl implements SearchService {
     }
 
     @Override
+    public int batchSyncPatentsToEs(List<Long> patentIds) {
+        if (!isEsAvailable()) {
+            log.warn("ES不可用，跳过批量同步");
+            return 0;
+        }
+
+        if (patentIds == null || patentIds.isEmpty()) {
+            return 0;
+        }
+
+        List<PatentDocument> documents = new ArrayList<>();
+        
+        try {
+            for (Long patentId : patentIds) {
+                Patent patent = patentMapper.selectById(patentId);
+                if (patent == null || !"SUCCESS".equals(patent.getParseStatus())) {
+                    continue;
+                }
+
+                // 获取实体和领域
+                List<PatentEntity> entities = patentEntityMapper.selectByPatentId(patentId);
+                List<PatentDomain> domains = patentDomainMapper.selectByPatentId(patentId);
+
+                // 构建ES文档
+                PatentDocument doc = new PatentDocument();
+                doc.setId(patent.getId().toString());
+                doc.setPublicationNo(patent.getPublicationNo());
+                doc.setTitle(patent.getTitle());
+                doc.setAbstractText(patent.getPatentAbstract());
+                doc.setApplicant(patent.getApplicant());
+                doc.setPublicationDate(patent.getPublicationDate());
+                doc.setSourceType(patent.getSourceType());
+                doc.setParseStatus(patent.getParseStatus());
+                doc.setCreatedAt(patent.getCreatedAt() != null ? patent.getCreatedAt().toLocalDate() : null);
+                doc.setUpdatedAt(patent.getUpdatedAt() != null ? patent.getUpdatedAt().toLocalDate() : null);
+
+                doc.setDomainCodes(domains.stream().map(PatentDomain::getDomainCode).toList());
+                doc.setDomainSection(domains.stream()
+                        .filter(d -> d.getDomainLevel() == 1)
+                        .map(PatentDomain::getDomainCode)
+                        .findFirst().orElse(null));
+
+                doc.setEntities(entities.stream().map(PatentEntity::getEntityName).toList());
+                doc.setEntityTypes(entities.stream()
+                        .map(PatentEntity::getEntityType)
+                        .distinct()
+                        .toList());
+
+                documents.add(doc);
+            }
+
+            if (!documents.isEmpty()) {
+                // 批量保存到ES
+                elasticsearchOperations.save(documents);
+                log.info("批量同步专利到ES成功, 数量: {}", documents.size());
+            }
+
+            return documents.size();
+
+        } catch (Exception e) {
+            log.error("批量同步专利到ES失败", e);
+            return 0;
+        }
+    }
+
+    @Override
     public void deleteFromEs(Long patentId) {
         if (!isEsAvailable()) {
             log.warn("ES不可用，跳过删除: {}", patentId);

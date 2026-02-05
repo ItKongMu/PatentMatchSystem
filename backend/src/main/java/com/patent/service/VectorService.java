@@ -38,4 +38,17 @@ public interface VectorService {
      * @param vectorId Qdrant向量ID
      */
     void deleteVector(String vectorId);
+
+    /**
+     * 批量存储专利向量
+     *
+     * @param patentDataList 专利数据列表（Patent, entities, domains）
+     * @return 向量ID映射（patentId -> vectorId）
+     */
+    java.util.Map<Long, String> batchStorePatentVectors(List<PatentVectorData> patentDataList);
+
+    /**
+     * 专利向量数据封装类
+     */
+    record PatentVectorData(Patent patent, List<PatentEntity> entities, List<PatentDomain> domains) {}
 }

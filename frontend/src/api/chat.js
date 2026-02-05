@@ -32,17 +32,36 @@ export const chatApi = {
   sendStream(data, { onSession, onContent, onTools, onPatents, onDone, onError }) {
     const abortController = new AbortController()
     
+    // 检查是否有 token
+    const token = localStorage.getItem('token')
+    if (!token) {
+      // 未登录，直接触发错误回调
+      setTimeout(() => {
+        if (onError) {
+          onError(new Error('未登录，请先登录'))
+        }
+      }, 0)
+      return abortController
+    }
+    
     fetch('/api/chat/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': localStorage.getItem('token') || ''
+        'Authorization': token
       },
       body: JSON.stringify(data),
       signal: abortController.signal
     })
       .then(response => {
         if (!response.ok) {
+          // 401 错误特殊处理
+          if (response.status === 401) {
+            // 清除本地登录状态
+            localStorage.removeItem('token')
+            localStorage.removeItem('userInfo')
+            throw new Error('登录已过期，请重新登录')
+          }
           throw new Error(`HTTP error! status: ${response.status}`)
         }
         

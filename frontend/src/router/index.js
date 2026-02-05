@@ -109,7 +109,15 @@ router.beforeEach((to, from, next) => {
   // 从localStorage获取token（避免在Pinia初始化前使用store）
   const token = localStorage.getItem('token')
   
-  if (to.meta.requiresAuth !== false && !token) {
+  // 检查路由链中是否有任何路由需要认证
+  // to.matched 包含了从根路由到当前路由的所有匹配记录
+  const requiresAuth = to.matched.some(record => record.meta.requiresAuth === true) || 
+                       (to.matched.length > 0 && to.matched.every(record => record.meta.requiresAuth !== false))
+  
+  // 检查是否明确不需要认证（如登录页、注册页）
+  const explicitlyNoAuth = to.meta.requiresAuth === false
+  
+  if (!explicitlyNoAuth && requiresAuth && !token) {
     // 需要认证但未登录
     next({ name: 'Login', query: { redirect: to.fullPath } })
   } else if (token && (to.name === 'Login' || to.name === 'Register')) {

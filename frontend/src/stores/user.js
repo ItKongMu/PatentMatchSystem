@@ -69,16 +69,27 @@ export const useUserStore = defineStore('user', () => {
     }
   }
   
+  // 清除本地登录状态（不调用API，用于被动登出如token过期）
+  function clearLocalAuth() {
+    token.value = ''
+    userInfo.value = null
+    localStorage.removeItem('token')
+    localStorage.removeItem('userInfo')
+  }
+  
   // 退出登录
-  async function logout() {
+  async function logout(callApi = true) {
     try {
-      await authApi.logout()
+      // 只有主动登出且有token时才调用API
+      if (callApi && token.value) {
+        await authApi.logout()
+      }
+    } catch (error) {
+      // 忽略登出API错误
+      console.warn('登出API调用失败:', error)
     } finally {
       // 无论成功失败都清除本地状态
-      token.value = ''
-      userInfo.value = null
-      localStorage.removeItem('token')
-      localStorage.removeItem('userInfo')
+      clearLocalAuth()
       router.push('/login')
     }
   }
@@ -99,6 +110,7 @@ export const useUserStore = defineStore('user', () => {
     login,
     register,
     fetchUserInfo,
+    clearLocalAuth,
     logout
   }
 })

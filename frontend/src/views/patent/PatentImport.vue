@@ -98,24 +98,39 @@
             <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="title" label="标题" min-width="200">
+        <el-table-column prop="title" label="标题" min-width="180">
           <template #default="{ row }">
             <div class="title-cell">
               {{ row.title || '—' }}
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="applicant" label="申请人" width="140">
+        <el-table-column prop="applicant" label="申请人" width="120">
           <template #default="{ row }">
             {{ row.applicant || '—' }}
           </template>
         </el-table-column>
-        <el-table-column prop="publicationDate" label="公开日期" width="120">
+        <el-table-column prop="publicationDate" label="公开日期" width="110">
           <template #default="{ row }">
             {{ row.publicationDate || '—' }}
           </template>
         </el-table-column>
-        <el-table-column prop="patentAbstract" label="摘要" min-width="250">
+        <el-table-column prop="ipcClassification" label="IPC分类" width="160">
+          <template #default="{ row }">
+            <el-tooltip 
+              :content="row.ipcClassification" 
+              placement="top" 
+              :show-after="500"
+              :disabled="!row.ipcClassification || row.ipcClassification.length < 20"
+            >
+              <span v-if="row.ipcClassification" class="mono-text ipc-cell">
+                {{ truncateText(row.ipcClassification, 20) }}
+              </span>
+              <span v-else class="text-muted">—</span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column prop="patentAbstract" label="摘要" min-width="180">
           <template #default="{ row }">
             <el-tooltip 
               :content="row.patentAbstract" 
@@ -127,6 +142,21 @@
                 {{ truncateText(row.patentAbstract, 50) }}
               </div>
             </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column prop="fullText" label="正文" width="120" align="center">
+          <template #default="{ row }">
+            <el-tooltip 
+              v-if="row.fullText && row.fullText.length > 0"
+              :content="truncateText(row.fullText, 200)" 
+              placement="top" 
+              :show-after="500"
+            >
+              <el-tag type="success" size="small">
+                {{ row.fullText.length > 1000 ? (Math.round(row.fullText.length / 1000) + 'K字') : (row.fullText.length + '字') }}
+              </el-tag>
+            </el-tooltip>
+            <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
         <el-table-column prop="valid" label="状态" width="100" align="center">
@@ -143,6 +173,10 @@
         <el-checkbox v-model="autoProcess">
           导入后自动处理（提取实体和向量化）
         </el-checkbox>
+        <div v-if="autoProcess && previewData.validRows > 5" class="batch-hint">
+          <el-icon><InfoFilled /></el-icon>
+          <span>系统将使用批处理模式提高处理效率（批量向量化和ES索引同步）</span>
+        </div>
       </div>
 
       <div class="action-buttons">
@@ -242,18 +276,36 @@
               <td>可选</td>
             </tr>
             <tr>
+              <td>IPC分类</td>
+              <td>IPC分类号，多个用逗号分隔（如 G06F 16/30, H04L 9/32）</td>
+              <td>可选</td>
+            </tr>
+            <tr>
               <td>摘要</td>
               <td>专利摘要/技术方案描述</td>
               <td><strong>必填</strong></td>
             </tr>
+            <tr>
+              <td>正文</td>
+              <td>专利正文内容（技术领域、背景技术、发明内容等）</td>
+              <td>可选（如有则存入系统用于深度分析）</td>
+            </tr>
           </tbody>
         </table>
+        <div class="format-tips">
+          <h4>说明：</h4>
+          <ul>
+            <li>如果提供了正文字段，系统会将完整内容存储到MinIO，用于后续的实体提取和向量化分析</li>
+            <li>如果正文为空，系统仅使用摘要进行分析处理</li>
+            <li>包含逗号的字段请用英文双引号包围</li>
+          </ul>
+        </div>
         <div class="format-example">
           <h4>示例：</h4>
           <code>
-公开号,标题,申请人,公开日期,摘要
-CN123456A,一种智能检测方法,某某公司,2024-01-15,本发明提供一种基于深度学习的...
-CN789012B,数据处理装置,研究院,2024-02-20,本实用新型涉及一种数据处理装置...
+公开号,标题,申请人,公开日期,IPC分类,摘要,正文
+CN123456A,一种智能检测方法,某某公司,2024-01-15,"G06F 16/30, G06N 3/08",本发明提供一种基于深度学习的...,"技术领域 本发明涉及..."
+CN789012B,数据处理装置,研究院,2024-02-20,G06F 17/30,本实用新型涉及一种数据处理装置...,
           </code>
         </div>
       </div>
@@ -267,11 +319,22 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, genFileId } from 'element-plus'
 import { 
   Download, UploadFilled, Document, View, Check,
-  CircleCheckFilled, CircleCloseFilled, WarningFilled 
+  CircleCheckFilled, CircleCloseFilled, WarningFilled, InfoFilled 
 } from '@element-plus/icons-vue'
 import { patentApi } from '@/api/patent'
 
 const router = useRouter()
+
+// 常量定义 - 与后端保持一致
+const CSV_CONSTANTS = {
+  MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
+  ALLOWED_MIME_TYPES: ['text/csv', 'application/vnd.ms-excel', 'text/plain'],
+  ALLOWED_EXTENSIONS: ['.csv'],
+  TITLE_MIN_LENGTH: 5,
+  TITLE_MAX_LENGTH: 200,
+  ABSTRACT_MIN_LENGTH: 10,
+  ABSTRACT_MAX_LENGTH: 5000
+}
 
 const uploadRef = ref(null)
 const selectedFile = ref(null)
@@ -282,8 +345,48 @@ const autoProcess = ref(false)
 const showResultDialog = ref(false)
 const importResult = ref(null)
 
+/**
+ * 验证CSV文件
+ * @param {File} file - 文件对象
+ * @returns {boolean} - 是否有效
+ */
+const validateCsvFile = (file) => {
+  // 验证文件扩展名
+  const fileName = file.name.toLowerCase()
+  const hasValidExtension = CSV_CONSTANTS.ALLOWED_EXTENSIONS.some(ext => fileName.endsWith(ext))
+  if (!hasValidExtension) {
+    ElMessage.error('只支持.csv格式的文件')
+    return false
+  }
+  
+  // 验证MIME类型（某些系统可能识别为不同类型）
+  const isValidMimeType = CSV_CONSTANTS.ALLOWED_MIME_TYPES.includes(file.type) || file.type === ''
+  if (!isValidMimeType) {
+    ElMessage.warning('文件类型可能不正确，请确保是有效的CSV文件')
+  }
+  
+  // 验证文件大小
+  if (file.size > CSV_CONSTANTS.MAX_FILE_SIZE) {
+    ElMessage.error(`文件大小不能超过${CSV_CONSTANTS.MAX_FILE_SIZE / 1024 / 1024}MB`)
+    return false
+  }
+  
+  // 验证文件是否为空
+  if (file.size === 0) {
+    ElMessage.error('文件内容为空，请选择有效的CSV文件')
+    return false
+  }
+  
+  return true
+}
+
 // 处理文件选择
 const handleFileChange = (file) => {
+  if (!validateCsvFile(file.raw)) {
+    uploadRef.value?.clearFiles()
+    selectedFile.value = null
+    return
+  }
   selectedFile.value = file.raw
   previewData.value = null
 }
@@ -292,6 +395,12 @@ const handleFileChange = (file) => {
 const handleExceed = (files) => {
   uploadRef.value.clearFiles()
   const file = files[0]
+  
+  // 先验证新文件
+  if (!validateCsvFile(file)) {
+    return
+  }
+  
   file.uid = genFileId()
   uploadRef.value.handleStart(file)
   selectedFile.value = file
@@ -324,7 +433,10 @@ const truncateText = (text, maxLength) => {
 
 // 预览CSV
 const handlePreview = async () => {
-  if (!selectedFile.value) return
+  if (!selectedFile.value) {
+    ElMessage.warning('请先选择CSV文件')
+    return
+  }
 
   previewLoading.value = true
   try {
@@ -334,15 +446,23 @@ const handlePreview = async () => {
     const res = await patentApi.previewCsv(formData)
     if (res.code === 200) {
       previewData.value = res.data
+      // 设置默认可导入状态（如果后端没有返回）
+      if (previewData.value.canImport === undefined) {
+        previewData.value.canImport = previewData.value.validRows > 0
+      }
+      
       if (res.data.invalidRows > 0) {
         ElMessage.warning(`解析完成，有 ${res.data.invalidRows} 条数据无效`)
       } else {
         ElMessage.success('解析完成')
       }
+    } else {
+      ElMessage.error(res.message || '文件解析失败')
     }
   } catch (error) {
     console.error('预览失败:', error)
-    ElMessage.error('文件解析失败，请检查CSV格式')
+    const errorMsg = error.response?.data?.message || error.message || '文件解析失败，请检查CSV格式'
+    ElMessage.error(errorMsg)
   } finally {
     previewLoading.value = false
   }
@@ -350,7 +470,10 @@ const handlePreview = async () => {
 
 // 执行导入
 const handleImport = async () => {
-  if (!previewData.value?.canImport) return
+  if (!previewData.value?.canImport) {
+    ElMessage.warning('没有可导入的有效数据')
+    return
+  }
 
   try {
     await ElMessageBox.confirm(
@@ -363,6 +486,12 @@ const handleImport = async () => {
     
     // 只导入有效数据
     const validData = previewData.value.allData.filter(item => item.valid)
+    
+    if (validData.length === 0) {
+      ElMessage.warning('没有可导入的有效数据')
+      return
+    }
+    
     const res = await patentApi.importCsvPreviewData(validData, autoProcess.value)
     
     if (res.code === 200) {
@@ -371,11 +500,14 @@ const handleImport = async () => {
       
       // 清空预览
       clearFile()
+    } else {
+      ElMessage.error(res.message || '导入失败')
     }
   } catch (error) {
     if (error !== 'cancel') {
       console.error('导入失败:', error)
-      ElMessage.error('导入失败，请重试')
+      const errorMsg = error.response?.data?.message || error.message || '导入失败，请重试'
+      ElMessage.error(errorMsg)
     }
   } finally {
     importLoading.value = false
@@ -393,9 +525,9 @@ const goToList = () => {
 
 // 下载CSV模板
 const downloadTemplate = () => {
-  const template = `公开号,标题,申请人,公开日期,摘要
-CN123456A,一种智能检测方法,某某公司,2024-01-15,本发明提供一种基于深度学习的智能检测方法，包括数据采集、特征提取和模型推理等步骤。
-CN789012B,数据处理装置,研究院,2024-02-20,本实用新型涉及一种数据处理装置，包括输入模块、处理模块和输出模块。`
+  const template = `公开号,标题,申请人,公开日期,IPC分类,摘要,正文
+CN123456A,一种智能检测方法,某某公司,2024-01-15,"G06F 16/30, G06N 3/08",本发明提供一种基于深度学习的智能检测方法，包括数据采集、特征提取和模型推理等步骤。该方法能够实现高精度的目标检测。,"技术领域 本发明涉及人工智能技术领域，尤其涉及一种智能检测方法。背景技术 目前，智能检测方法越来越受到重视..."
+CN789012B,数据处理装置,研究院,2024-02-20,G06F 17/30,本实用新型涉及一种数据处理装置，包括输入模块、处理模块和输出模块。该装置能够高效处理大规模数据。,`
 
   const blob = new Blob(['\uFEFF' + template], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -580,10 +712,15 @@ CN789012B,数据处理装置,研究院,2024-02-20,本实用新型涉及一种数
   color: var(--color-text-disabled);
 }
 
-.title-cell, .abstract-cell {
+.title-cell, .abstract-cell, .ipc-cell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ipc-cell {
+  display: inline-block;
+  max-width: 100%;
 }
 
 .import-options {
@@ -591,6 +728,22 @@ CN789012B,数据处理装置,研究院,2024-02-20,本实用新型涉及一种数
   background-color: var(--color-bg-secondary);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-4);
+
+  .batch-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background-color: #e6f7ff;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    color: var(--color-info);
+    
+    .el-icon {
+      font-size: 14px;
+    }
+  }
 }
 
 // 导入结果
@@ -680,6 +833,28 @@ CN789012B,数据处理装置,研究院,2024-02-20,本实用新型涉及一种数
     }
   }
   
+  .format-tips {
+    margin-bottom: var(--space-4);
+    
+    h4 {
+      font-size: var(--text-sm);
+      font-weight: var(--font-medium);
+      margin-bottom: var(--space-2);
+      color: var(--color-text-primary);
+    }
+    
+    ul {
+      margin: 0;
+      padding-left: var(--space-4);
+      
+      li {
+        margin-bottom: var(--space-1);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+      }
+    }
+  }
+
   .format-example {
     background-color: var(--color-bg-secondary);
     border-radius: var(--radius-md);
