@@ -16,6 +16,7 @@ import com.patent.model.entity.PatentDomain;
 import com.patent.model.entity.PatentEntity;
 import com.patent.model.vo.MatchResultVO;
 import com.patent.service.AuthService;
+import com.patent.service.GraphService;
 import com.patent.service.LlmService;
 import com.patent.service.MatchService;
 import com.patent.service.VectorService;
@@ -47,6 +48,7 @@ public class MatchServiceImpl implements MatchService {
     private final VectorService vectorService;
     private final LlmService llmService;
     private final AuthService authService;
+    private final GraphService graphService;
 
     @Override
     @Transactional
@@ -206,9 +208,17 @@ public class MatchServiceImpl implements MatchService {
     }
 
     /**
-     * 构建匹配项 - 增强版，包含详细匹配解释
+     * 构建匹配项 - 增强版，包含详细匹配解释和图谱增强评分
      */
     private MatchResultVO.MatchItemVO buildMatchItem(Patent patent, LlmService.MatchScoreResult scoreResult) {
+        return buildMatchItem(patent, scoreResult, null);
+    }
+
+    /**
+     * 构建匹配项 - 带查询实体列表，用于图谱增强评分
+     */
+    private MatchResultVO.MatchItemVO buildMatchItem(Patent patent, LlmService.MatchScoreResult scoreResult,
+                                                      List<String> queryEntityNames) {
         MatchResultVO.MatchItemVO item = new MatchResultVO.MatchItemVO();
         item.setPatentId(patent.getId());
         item.setPublicationNo(patent.getPublicationNo());
@@ -220,9 +230,21 @@ public class MatchServiceImpl implements MatchService {
         List<PatentDomain> domains = patentDomainMapper.selectByPatentId(patent.getId());
         item.setDomainCodes(domains.stream().map(PatentDomain::getDomainCode).toList());
 
+        // LLM 基础评分（归一化到 0~1）
+        double sVec = scoreResult.score() / 100.0;
+
+        // 图谱增强评分 S_graph（Neo4j 不可用时降级为 0）
+        double sGraph = 0.0;
+        if (patent.getPublicationNo() != null) {
+            sGraph = graphService.calculateGraphScore(patent.getPublicationNo(), queryEntityNames);
+        }
+
+        // 综合评分：w1=0.9（LLM评分已包含语义+实体+领域）, w4=0.1（图谱路径分）
+        double finalScore = 0.9 * sVec + 0.1 * sGraph;
+        finalScore = Math.min(1.0, Math.max(0.0, finalScore));
+
         // 设置评分
-        item.setSimilarityScore(BigDecimal.valueOf(scoreResult.score())
-                .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP));
+        item.setSimilarityScore(BigDecimal.valueOf(finalScore).setScale(4, RoundingMode.HALF_UP));
         item.setMatchType("HYBRID");
         item.setEntityMatchCount(scoreResult.matchedEntities().size());
         item.setDomainMatch(scoreResult.domainMatched());

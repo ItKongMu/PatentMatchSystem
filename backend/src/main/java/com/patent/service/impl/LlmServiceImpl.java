@@ -112,11 +112,15 @@ public class LlmServiceImpl implements LlmService {
             - 0-29：技术方案基本无关
             """;
 
-    public LlmServiceImpl(@Qualifier("primaryChatModel") ChatModel chatModel,
+    public LlmServiceImpl(@Qualifier("llmChatModel") ChatModel chatModel,
                           PatentConfig patentConfig) {
         this.patentConfig = patentConfig;
         this.chatClient = ChatClient.builder(chatModel).build();
-        log.info("LLM服务初始化完成，模式: {}", patentConfig.getLlmMode());
+        log.info("LLM分析服务初始化完成，模式: {}，分析模型: {}",
+                patentConfig.getLlmMode(),
+                "offline".equals(patentConfig.getLlmMode())
+                        ? patentConfig.getOllama().getLlmModel()
+                        : patentConfig.getOnline().getLlmModel());
     }
 
     @Override

@@ -32,7 +32,10 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -89,7 +92,7 @@ public class ChatServiceImpl implements ChatService {
             5. 最后可以提供1-2个后续建议问题帮助用户深入探索
             """;
 
-    public ChatServiceImpl(@Qualifier("primaryChatModel") ChatModel chatModel,
+    public ChatServiceImpl(@Qualifier("chatChatModel") ChatModel chatModel,
                            SearchService searchService,
                            MatchService matchService,
                            MongoChatMemoryRepository mongoChatMemoryRepository,
@@ -100,21 +103,22 @@ public class ChatServiceImpl implements ChatService {
         this.mongoChatMemoryRepository = mongoChatMemoryRepository;
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
-        
+
         // 使用 MongoDB 实现的 ChatMemoryRepository 创建会话记忆
         this.chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(mongoChatMemoryRepository)
                 .maxMessages(20)
                 .build();
-        
+
         // 创建 ChatClient，注册工具函数和记忆advisor
+        // 使用 chatChatModel（对话专用：在线=qwen-max，离线=deepseek-r1:7b）
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultTools(this)  // 注册当前类中的 @Tool 方法
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
-        
-        log.info("对话式检索服务初始化完成（MongoDB 持久化已启用）");
+
+        log.info("对话式检索服务初始化完成（使用 chatChatModel 对话专用模型，MongoDB 持久化已启用）");
     }
 
     @Override
@@ -186,90 +190,83 @@ public class ChatServiceImpl implements ChatService {
         }
 
         final String conversationId = sessionId;
-        
+
         // 获取当前登录用户ID并设置到 ThreadLocal
         Long userId = getCurrentUserId();
         MongoChatMemoryRepository.setCurrentUserId(userId);
-        
+        MongoChatMemoryRepository.registerSessionUser(conversationId, userId);
+
         // 清理线程本地存储
         toolCallRecords.get().clear();
         searchResults.get().clear();
 
-        log.info("开始流式对话: sessionId={}, userId={}, message={}", conversationId, userId, dto.getMessage());
+        log.info("开始流式对话(非流式执行+模拟流输出): sessionId={}, userId={}, message={}", conversationId, userId, dto.getMessage());
 
-        try {
-            // 首先发送会话ID事件
-            Flux<String> sessionEvent = Flux.just(formatSSEEvent("session", 
-                    JSON.toJSONString(Map.of("sessionId", conversationId))));
+        // 先发送 session 事件
+        Flux<String> sessionEvent = Flux.just(formatSSEEvent("session",
+                JSON.toJSONString(Map.of("sessionId", conversationId))));
 
-            // 流式获取AI回复
-            Flux<String> contentStream = chatClient.prompt()
-                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
-                    .user(dto.getMessage())
-                    .stream()
-                    .content()
-                    .map(chunk -> formatSSEEvent("content", chunk))
-                    .doOnComplete(() -> {
-                        log.info("流式对话内容传输完成: sessionId={}", conversationId);
-                    })
-                    .doOnError(error -> {
-                        log.error("流式对话出错: sessionId={}", conversationId, error);
-                    })
-                    .onErrorResume(error -> {
-                        log.error("流式对话发生错误，返回错误事件: sessionId={}", conversationId, error);
-                        String errorMessage = getReadableErrorMessage(error);
-                        return Flux.just(formatSSEEvent("error", JSON.toJSONString(Map.of(
-                                "message", errorMessage,
-                                "timestamp", LocalDateTime.now().toString()
-                        ))));
-                    });
+        // 使用非流式 .call() 执行（含 Function Calling），规避通义千问流式 Function Calling toolName 为空的 bug
+        Flux<String> mainFlux = Mono.fromCallable(() -> {
+                    MongoChatMemoryRepository.setCurrentUserId(userId);
+                    try {
+                        String response = chatClient.prompt()
+                                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
+                                .user(dto.getMessage())
+                                .call()
+                                .content();
+                        log.info("流式对话(非流式执行)完成: sessionId={}, 响应长度={}", conversationId,
+                                response != null ? response.length() : 0);
+                        return response != null ? response : "";
+                    } finally {
+                        MongoChatMemoryRepository.clearCurrentUserId();
+                    }
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(fullText -> {
+                    // 将完整文本拆分成 chunk，模拟流式打字效果（每次最多4个字符）
+                    List<String> chunks = splitIntoChunks(fullText, 4);
+                    List<String> contentEvents = chunks.stream()
+                            .map(chunk -> formatSSEEvent("content", chunk))
+                            .toList();
 
-            // 完成后发送工具调用和检索结果
-            Flux<String> completeEvent = Flux.defer(() -> {
-                List<ToolCallInfo> tools = new ArrayList<>(toolCallRecords.get());
-                List<PatentSummaryVO> patents = new ArrayList<>(searchResults.get());
-                
-                // 清理线程本地存储
-                toolCallRecords.remove();
-                searchResults.remove();
-                MongoChatMemoryRepository.clearCurrentUserId();
+                    // 收集工具调用与检索结果
+                    List<ToolCallInfo> tools = new ArrayList<>(toolCallRecords.get());
+                    List<PatentSummaryVO> patents = new ArrayList<>(searchResults.get());
+                    toolCallRecords.remove();
+                    searchResults.remove();
 
-                List<String> events = new ArrayList<>();
-                
-                if (!tools.isEmpty()) {
-                    events.add(formatSSEEvent("tools", JSON.toJSONString(tools)));
-                }
-                
-                if (!patents.isEmpty()) {
-                    events.add(formatSSEEvent("patents", JSON.toJSONString(patents)));
-                }
-                
-                events.add(formatSSEEvent("done", JSON.toJSONString(Map.of(
-                        "timestamp", LocalDateTime.now().toString(),
-                        "suggestions", generateSuggestions(dto.getMessage(), "")
-                ))));
+                    List<String> tailEvents = new ArrayList<>();
+                    if (!tools.isEmpty()) {
+                        tailEvents.add(formatSSEEvent("tools", JSON.toJSONString(tools)));
+                    }
+                    if (!patents.isEmpty()) {
+                        tailEvents.add(formatSSEEvent("patents", JSON.toJSONString(patents)));
+                    }
+                    tailEvents.add(formatSSEEvent("done", JSON.toJSONString(Map.of(
+                            "timestamp", LocalDateTime.now().toString(),
+                            "suggestions", generateSuggestions(dto.getMessage(), fullText)
+                    ))));
 
-                return Flux.fromIterable(events);
-            })
-            .onErrorResume(error -> Flux.empty());
+                    // content chunk 之间加极短延迟模拟打字，tail 事件紧随其后
+                    Flux<String> contentFlux = Flux.fromIterable(contentEvents)
+                            .delayElements(Duration.ofMillis(20));
+                    Flux<String> tailFlux = Flux.fromIterable(tailEvents);
+                    return Flux.concat(contentFlux, tailFlux);
+                })
+                .doOnError(error -> log.error("流式对话(非流式执行)出错: sessionId={}", conversationId, error))
+                .onErrorResume(error -> {
+                    toolCallRecords.remove();
+                    searchResults.remove();
+                    MongoChatMemoryRepository.clearCurrentUserId();
+                    String errorMessage = getReadableErrorMessage(error);
+                    return Flux.just(formatSSEEvent("error", JSON.toJSONString(Map.of(
+                            "message", errorMessage,
+                            "timestamp", LocalDateTime.now().toString()
+                    ))));
+                });
 
-            return Flux.concat(sessionEvent, contentStream, completeEvent)
-                    .onErrorResume(error -> {
-                        log.error("流式对话全局错误处理: sessionId={}", conversationId, error);
-                        String errorMessage = getReadableErrorMessage(error);
-                        return Flux.just(formatSSEEvent("error", JSON.toJSONString(Map.of(
-                                "message", errorMessage,
-                                "timestamp", LocalDateTime.now().toString()
-                        ))));
-                    });
-
-        } catch (Exception e) {
-            log.error("流式对话初始化失败", e);
-            MongoChatMemoryRepository.clearCurrentUserId();
-            return Flux.just(formatSSEEvent("error", JSON.toJSONString(Map.of(
-                    "message", "对话处理失败: " + e.getMessage()
-            ))));
-        }
+        return Flux.concat(sessionEvent, mainFlux);
     }
 
     /**
@@ -287,116 +284,104 @@ public class ChatServiceImpl implements ChatService {
         }
 
         final String conversationId = sessionId;
-        
+
         // 获取当前登录用户ID并设置到 ThreadLocal
         Long userId = getCurrentUserId();
         MongoChatMemoryRepository.setCurrentUserId(userId);
-        
+
         // 注册会话与用户的映射（解决WebFlux跨线程问题）
         MongoChatMemoryRepository.registerSessionUser(conversationId, userId);
-        
+
         // 清理线程本地存储
         toolCallRecords.get().clear();
         searchResults.get().clear();
 
-        log.info("开始SSE流式对话: sessionId={}, userId={}, message={}", conversationId, userId, dto.getMessage());
+        log.info("开始SSE流式对话(非流式执行+模拟流输出): sessionId={}, userId={}, message={}", conversationId, userId, dto.getMessage());
 
-        try {
-            // 首先发送会话ID事件
-            Flux<ServerSentEvent<String>> sessionEvent = Flux.just(
+        // 先发送 session 事件
+        Flux<ServerSentEvent<String>> sessionEvent = Flux.just(
                 ServerSentEvent.<String>builder()
-                    .event("session")
-                    .data(JSON.toJSONString(Map.of("sessionId", conversationId)))
-                    .build()
-            );
+                        .event("session")
+                        .data(JSON.toJSONString(Map.of("sessionId", conversationId)))
+                        .build()
+        );
 
-            // 流式获取AI回复
-            Flux<ServerSentEvent<String>> contentStream = chatClient.prompt()
-                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
-                    .user(dto.getMessage())
-                    .stream()
-                    .content()
-                    .map(chunk -> ServerSentEvent.<String>builder()
-                            .event("content")
-                            .data(chunk)
-                            .build())
-                    .doOnComplete(() -> {
-                        log.info("SSE流式对话内容传输完成: sessionId={}", conversationId);
-                    })
-                    .doOnError(error -> {
-                        log.error("SSE流式对话出错: sessionId={}", conversationId, error);
-                    })
-                    .onErrorResume(error -> {
-                        log.error("SSE流式对话发生错误，返回错误事件: sessionId={}", conversationId, error);
-                        String errorMessage = getReadableErrorMessage(error);
-                        return Flux.just(ServerSentEvent.<String>builder()
-                                .event("error")
-                                .data(JSON.toJSONString(Map.of(
-                                        "message", errorMessage,
-                                        "timestamp", LocalDateTime.now().toString()
-                                )))
+        // 使用非流式 .call() 执行（含 Function Calling），规避通义千问流式 Function Calling toolName 为空的 bug
+        Flux<ServerSentEvent<String>> mainFlux = Mono.fromCallable(() -> {
+                    MongoChatMemoryRepository.setCurrentUserId(userId);
+                    try {
+                        String response = chatClient.prompt()
+                                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
+                                .user(dto.getMessage())
+                                .call()
+                                .content();
+                        log.info("SSE流式对话(非流式执行)完成: sessionId={}, 响应长度={}", conversationId,
+                                response != null ? response.length() : 0);
+                        return response != null ? response : "";
+                    } finally {
+                        MongoChatMemoryRepository.clearCurrentUserId();
+                    }
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(fullText -> {
+                    // 将完整文本拆分成 chunk，模拟流式打字效果（每次最多4个字符）
+                    List<String> chunks = splitIntoChunks(fullText, 4);
+                    List<ServerSentEvent<String>> contentEvents = chunks.stream()
+                            .map(chunk -> ServerSentEvent.<String>builder()
+                                    .event("content")
+                                    .data(chunk)
+                                    .build())
+                            .toList();
+
+                    // 收集工具调用与检索结果
+                    List<ToolCallInfo> tools = new ArrayList<>(toolCallRecords.get());
+                    List<PatentSummaryVO> patents = new ArrayList<>(searchResults.get());
+                    toolCallRecords.remove();
+                    searchResults.remove();
+
+                    List<ServerSentEvent<String>> tailEvents = new ArrayList<>();
+                    if (!tools.isEmpty()) {
+                        tailEvents.add(ServerSentEvent.<String>builder()
+                                .event("tools")
+                                .data(JSON.toJSONString(tools))
                                 .build());
-                    });
-
-            // 完成后发送工具调用和检索结果
-            Flux<ServerSentEvent<String>> completeEvent = Flux.defer(() -> {
-                List<ToolCallInfo> tools = new ArrayList<>(toolCallRecords.get());
-                List<PatentSummaryVO> patents = new ArrayList<>(searchResults.get());
-                
-                // 清理线程本地存储
-                toolCallRecords.remove();
-                searchResults.remove();
-                MongoChatMemoryRepository.clearCurrentUserId();
-
-                List<ServerSentEvent<String>> events = new ArrayList<>();
-                
-                if (!tools.isEmpty()) {
-                    events.add(ServerSentEvent.<String>builder()
-                            .event("tools")
-                            .data(JSON.toJSONString(tools))
-                            .build());
-                }
-                
-                if (!patents.isEmpty()) {
-                    events.add(ServerSentEvent.<String>builder()
-                            .event("patents")
-                            .data(JSON.toJSONString(patents))
-                            .build());
-                }
-                
-                events.add(ServerSentEvent.<String>builder()
-                        .event("done")
-                        .data(JSON.toJSONString(Map.of(
-                                "timestamp", LocalDateTime.now().toString(),
-                                "suggestions", generateSuggestions(dto.getMessage(), "")
-                        )))
-                        .build());
-
-                return Flux.fromIterable(events);
-            })
-            .onErrorResume(error -> Flux.empty());
-
-            return Flux.concat(sessionEvent, contentStream, completeEvent)
-                    .onErrorResume(error -> {
-                        log.error("SSE流式对话全局错误处理: sessionId={}", conversationId, error);
-                        String errorMessage = getReadableErrorMessage(error);
-                        return Flux.just(ServerSentEvent.<String>builder()
-                                .event("error")
-                                .data(JSON.toJSONString(Map.of(
-                                        "message", errorMessage,
-                                        "timestamp", LocalDateTime.now().toString()
-                                )))
+                    }
+                    if (!patents.isEmpty()) {
+                        tailEvents.add(ServerSentEvent.<String>builder()
+                                .event("patents")
+                                .data(JSON.toJSONString(patents))
                                 .build());
-                    });
+                    }
+                    tailEvents.add(ServerSentEvent.<String>builder()
+                            .event("done")
+                            .data(JSON.toJSONString(Map.of(
+                                    "timestamp", LocalDateTime.now().toString(),
+                                    "suggestions", generateSuggestions(dto.getMessage(), fullText)
+                            )))
+                            .build());
 
-        } catch (Exception e) {
-            log.error("SSE流式对话初始化失败", e);
-            MongoChatMemoryRepository.clearCurrentUserId();
-            return Flux.just(ServerSentEvent.<String>builder()
-                    .event("error")
-                    .data(JSON.toJSONString(Map.of("message", "对话处理失败: " + e.getMessage())))
-                    .build());
-        }
+                    // content chunk 之间加极短延迟模拟打字，tail 事件紧随其后
+                    Flux<ServerSentEvent<String>> contentFlux = Flux.fromIterable(contentEvents)
+                            .delayElements(Duration.ofMillis(20));
+                    Flux<ServerSentEvent<String>> tailFlux = Flux.fromIterable(tailEvents);
+                    return Flux.concat(contentFlux, tailFlux);
+                })
+                .doOnError(error -> log.error("SSE流式对话(非流式执行)出错: sessionId={}", conversationId, error))
+                .onErrorResume(error -> {
+                    toolCallRecords.remove();
+                    searchResults.remove();
+                    MongoChatMemoryRepository.clearCurrentUserId();
+                    String errorMessage = getReadableErrorMessage(error);
+                    return Flux.just(ServerSentEvent.<String>builder()
+                            .event("error")
+                            .data(JSON.toJSONString(Map.of(
+                                    "message", errorMessage,
+                                    "timestamp", LocalDateTime.now().toString()
+                            )))
+                            .build());
+                });
+
+        return Flux.concat(sessionEvent, mainFlux);
     }
 
     // ==================== 会话管理接口实现 ====================
@@ -758,6 +743,22 @@ public class ChatServiceImpl implements ChatService {
     }
 
     // ==================== 辅助方法 ====================
+
+    /**
+     * 将文本拆分成指定大小的 chunk 列表，用于模拟流式输出
+     * 对中文友好：按字符数分割
+     */
+    private List<String> splitIntoChunks(String text, int chunkSize) {
+        if (text == null || text.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> chunks = new ArrayList<>();
+        int len = text.length();
+        for (int i = 0; i < len; i += chunkSize) {
+            chunks.add(text.substring(i, Math.min(i + chunkSize, len)));
+        }
+        return chunks;
+    }
 
     /**
      * 获取当前登录用户ID

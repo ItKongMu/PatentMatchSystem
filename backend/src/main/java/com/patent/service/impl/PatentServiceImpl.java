@@ -15,6 +15,7 @@ import com.patent.model.vo.PatentListVO;
 import com.patent.model.vo.PatentVO;
 import com.patent.model.vo.UploadResultVO;
 import com.patent.service.*;
+import com.patent.service.GraphService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -49,6 +50,7 @@ public class PatentServiceImpl implements PatentService {
     private final AuthService authService;
     private final PatentProcessorService patentProcessorService;
     private final SearchService searchService;
+    private final GraphService graphService;
 
     @Override
     @Transactional
@@ -253,6 +255,15 @@ public class PatentServiceImpl implements PatentService {
             searchService.deleteFromEs(patentId);
         } catch (Exception e) {
             log.warn("从ES删除专利索引失败: {}", patentId, e);
+        }
+
+        // 从 Neo4j 删除图谱节点
+        if (patent.getPublicationNo() != null) {
+            try {
+                graphService.deletePatentGraph(patent.getPublicationNo());
+            } catch (Exception e) {
+                log.warn("从Neo4j删除专利图谱失败: {}", patentId, e);
+            }
         }
 
         // 删除专利记录

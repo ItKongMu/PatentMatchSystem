@@ -4,6 +4,7 @@ import com.patent.config.PatentConfig;
 import com.patent.mapper.*;
 import com.patent.model.entity.*;
 import com.patent.service.FileService;
+import com.patent.service.GraphService;
 import com.patent.service.LlmService;
 import com.patent.service.SearchService;
 import com.patent.service.StatsService;
@@ -46,6 +47,7 @@ public class PatentProcessorService {
     private final SearchService searchService;
     private final StatsService statsService;
     private final PatentConfig patentConfig;
+    private final GraphService graphService;
 
     /**
      * 异步处理专利
@@ -95,7 +97,18 @@ public class PatentProcessorService {
                 log.warn("专利同步到ES失败（不影响主流程）: {}", patentId, e);
             }
 
-            // 6. 清除统计缓存（确保统计数据实时更新）
+            // 6. 写入 Neo4j 知识图谱
+            try {
+                Patent latestPatent = patentMapper.selectById(patentId);
+                List<PatentEntity> entities = patentEntityMapper.selectByPatentId(patentId);
+                List<PatentDomain> domains = patentDomainMapper.selectByPatentId(patentId);
+                graphService.upsertPatentGraph(latestPatent, entities, domains);
+                log.info("专利图谱写入成功: {}", patentId);
+            } catch (Exception e) {
+                log.warn("专利图谱写入失败（不影响主流程）: {}", patentId, e);
+            }
+
+            // 7. 清除统计缓存（确保统计数据实时更新）
             try {
                 statsService.evictAllStatsCache();
             } catch (Exception e) {
@@ -161,7 +174,15 @@ public class PatentProcessorService {
                 esBatch.add(patentId);
                 processedIds.add(patentId);
 
-                // 3. 达到批次大小时执行批量操作
+                // 3. 写入 Neo4j 图谱（逐个处理，不影响批量向量化）
+                try {
+                    Patent latestPatent = patentMapper.selectById(patentId);
+                    graphService.upsertPatentGraph(latestPatent, entities, domains);
+                } catch (Exception e) {
+                    log.warn("批量处理中图谱写入失败（不影响主流程）: {}", patentId, e);
+                }
+
+                // 4. 达到批次大小时执行批量操作
                 if (vectorDataBatch.size() >= batchSize) {
                     executeBatchOperations(vectorDataBatch, esBatch);
                     vectorDataBatch.clear();

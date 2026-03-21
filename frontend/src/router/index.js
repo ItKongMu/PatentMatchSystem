@@ -81,10 +81,22 @@ const routes = [
         meta: { title: '数据分析', icon: 'DataAnalysis' }
       },
       {
+        path: 'graph',
+        name: 'KnowledgeGraph',
+        component: () => import('@/views/graph/KnowledgeGraph.vue'),
+        meta: { title: '知识图谱', icon: 'Share' }
+      },
+      {
         path: 'user/profile',
         name: 'UserProfile',
         component: () => import('@/views/user/Profile.vue'),
         meta: { title: '个人信息', hidden: true }
+      },
+      {
+        path: 'settings/llm',
+        name: 'LlmSettings',
+        component: () => import('@/views/settings/LlmSettings.vue'),
+        meta: { title: 'LLM配置', icon: 'Setting' }
       }
     ]
   },

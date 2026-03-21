@@ -200,10 +200,13 @@ public class VectorServiceImpl implements VectorService {
 
     /**
      * 获取当前使用的嵌入模型名称
+     * 离线模式：bge-m3（1024维）/ 在线模式：text-embedding-v3（1024维）
+     * 两者维度相同，可无缝切换，无需重建 Qdrant Collection
      */
     private String getEmbeddingModelName() {
-        return "online".equals(patentConfig.getLlmMode()) 
-                ? "text-embedding-v3" 
-                : "nomic-embed-text";
+        if ("offline".equals(patentConfig.getLlmMode())) {
+            return patentConfig.getOllama().getEmbedModel();
+        }
+        return patentConfig.getOnline().getEmbedModel();
     }
 }

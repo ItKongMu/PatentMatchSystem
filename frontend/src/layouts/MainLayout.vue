@@ -133,6 +133,34 @@
             </el-icon>
             <template #title>数据分析</template>
           </el-menu-item>
+
+          <el-menu-item index="/graph">
+            <el-icon>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="18" cy="5" r="3"/>
+                <circle cx="6" cy="12" r="3"/>
+                <circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+            </el-icon>
+            <template #title>知识图谱</template>
+          </el-menu-item>
+        </div>
+
+        <div class="menu-section">
+          <div v-show="!isCollapse" class="menu-section-title">系统设置</div>
+
+          <el-menu-item index="/settings/llm">
+            <el-icon>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+                <path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>
+              </svg>
+            </el-icon>
+            <template #title>LLM 配置</template>
+          </el-menu-item>
         </div>
       </el-menu>
       
@@ -251,7 +279,7 @@ const userStore = useUserStore()
 
 const isCollapse = ref(false)
 const searchKeyword = ref('')
-const cachedViews = ref(['PatentList', 'PatentSearch', 'PatentMatch', 'PatentChat'])
+const cachedViews = ref(['PatentList', 'PatentSearch', 'PatentMatch', 'PatentChat', 'KnowledgeGraph'])
 
 const activeMenu = computed(() => route.path)
 const currentRoute = computed(() => route)
@@ -555,6 +583,7 @@ const handleCommand = (command) => {
   padding: var(--space-6);
   overflow: auto;
   flex: 1;
+  min-height: 0;
 }
 
 // 底部

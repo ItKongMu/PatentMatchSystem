@@ -17,11 +17,26 @@
                 <polyline points="12 19 5 12 12 5"/>
               </svg>
             </el-icon>
-            返回列表
+            返回
           </el-button>
           
           <div class="header-actions">
             <FavoriteButton v-if="patent.id" :patent-id="patent.id" />
+            <el-button
+              v-if="patent.publicationNo"
+              @click="handleViewGraph"
+            >
+              <el-icon>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="18" cy="5" r="3"/>
+                  <circle cx="6" cy="12" r="3"/>
+                  <circle cx="18" cy="19" r="3"/>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                </svg>
+              </el-icon>
+              知识图谱
+            </el-button>
             <el-button
               v-if="patent.parseStatus === 'SUCCESS'"
               type="primary"
@@ -345,6 +360,13 @@ const handleMatch = () => {
   router.push({
     path: '/match',
     query: { patentId: patent.value.id }
+  })
+}
+
+const handleViewGraph = () => {
+  router.push({
+    path: '/graph',
+    query: { mode: 'patent', q: patent.value.publicationNo }
   })
 }
 

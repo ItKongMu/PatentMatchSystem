@@ -7,7 +7,11 @@ import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerIntercept
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 
+import javax.sql.DataSource;
 import java.time.LocalDateTime;
 
 /**
@@ -15,6 +19,16 @@ import java.time.LocalDateTime;
  */
 @Configuration
 public class MybatisPlusConfig {
+
+    /**
+     * MySQL 主事务管理器（@Primary 确保多事务管理器共存时默认使用此实现）
+     * 解决 Neo4j reactiveTransactionManager 与 MySQL transactionManager 冲突问题
+     */
+    @Primary
+    @Bean("transactionManager")
+    public PlatformTransactionManager transactionManager(DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
 
     /**
      * 分页插件配置
