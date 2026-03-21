@@ -42,7 +42,9 @@ public class LlmConfigServiceImpl implements LlmConfigService {
 
     @Override
     public List<LlmConfigVO> listConfigs(Long userId) {
-        List<SysLlmConfig> configs = llmConfigMapper.findAllByUserId(userId);
+        // 合并返回：系统默认配置（user_id=0）+ 用户自定义配置
+        // 系统配置排前面，用户配置排后面
+        List<SysLlmConfig> configs = llmConfigMapper.findAllWithSystem(userId);
         return configs.stream()
                 .map(this::toVO)
                 .collect(Collectors.toList());
@@ -60,7 +62,7 @@ public class LlmConfigServiceImpl implements LlmConfigService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public LlmConfigVO saveConfig(Long userId, LlmConfigDTO dto) {
+    public LlmConfigVO saveConfig(Long userId, boolean isAdmin, LlmConfigDTO dto) {
         validateConfig(dto);
 
         SysLlmConfig config;
@@ -70,14 +72,24 @@ public class LlmConfigServiceImpl implements LlmConfigService {
             if (config == null || config.getDeleted() == 1) {
                 throw new BusinessException("配置不存在");
             }
-            // 只允许操作自己的配置（非系统配置）
-            if (!config.getUserId().equals(userId) && !userId.equals(0L)) {
+            // 系统默认配置（user_id=0）仅管理员可修改
+            if (config.getUserId() == 0L && !isAdmin) {
+                throw new BusinessException("系统默认配置不允许修改，请新增自定义配置");
+            }
+            // 非管理员只允许操作自己的配置
+            if (!isAdmin && !config.getUserId().equals(userId)) {
                 throw new BusinessException("无权修改此配置");
             }
         } else {
-            // 新增操作
+            // 新增操作：用户可以新增离线或在线配置
+            // 管理员新增时若指定为系统配置则 userId=0，否则为自己
             config = new SysLlmConfig();
-            config.setUserId(userId);
+            // isSystemConfig=true 且管理员 → userId=0
+            if (Boolean.TRUE.equals(dto.getIsSystemConfig()) && isAdmin) {
+                config.setUserId(0L);
+            } else {
+                config.setUserId(userId);
+            }
             config.setIsActive(0);
             config.setCreatedAt(LocalDateTime.now());
         }
@@ -110,17 +122,26 @@ public class LlmConfigServiceImpl implements LlmConfigService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void activateConfig(Long userId, Long configId) {
+    public void activateConfig(Long userId, boolean isAdmin, Long configId) {
         SysLlmConfig config = llmConfigMapper.selectById(configId);
         if (config == null || config.getDeleted() == 1) {
             throw new BusinessException("配置不存在");
         }
-        if (!config.getUserId().equals(userId) && !userId.equals(0L)) {
-            throw new BusinessException("无权激活此配置");
+        // 系统配置由管理员激活（userId=0维度），用户配置由用户激活（userId维度）
+        boolean isSystemConfig = config.getUserId() == 0L;
+        if (isSystemConfig) {
+            if (!isAdmin) {
+                throw new BusinessException("无权激活系统默认配置");
+            }
+            // 管理员激活系统配置：先取消所有系统配置的激活状态
+            llmConfigMapper.deactivateAllByUserId(0L);
+        } else {
+            if (!isAdmin && !config.getUserId().equals(userId)) {
+                throw new BusinessException("无权激活此配置");
+            }
+            // 取消当前用户所有激活状态
+            llmConfigMapper.deactivateAllByUserId(config.getUserId());
         }
-
-        // 先取消该用户所有启用状态
-        llmConfigMapper.deactivateAllByUserId(userId);
 
         // 再激活目标配置
         config.setIsActive(1);
@@ -132,12 +153,17 @@ public class LlmConfigServiceImpl implements LlmConfigService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void deleteConfig(Long userId, Long configId) {
+    public void deleteConfig(Long userId, boolean isAdmin, Long configId) {
         SysLlmConfig config = llmConfigMapper.selectById(configId);
         if (config == null || config.getDeleted() == 1) {
             throw new BusinessException("配置不存在");
         }
-        if (!config.getUserId().equals(userId) && !userId.equals(0L)) {
+        // 系统默认配置仅管理员可删除
+        if (config.getUserId() == 0L && !isAdmin) {
+            throw new BusinessException("系统默认配置不允许删除");
+        }
+        // 非管理员只能删除自己的配置
+        if (!isAdmin && !config.getUserId().equals(userId)) {
             throw new BusinessException("无权删除此配置");
         }
         if (config.getIsActive() == 1) {
@@ -285,6 +311,7 @@ public class LlmConfigServiceImpl implements LlmConfigService {
                 .embedModel(config.getEmbedModel())
                 .ollamaUrl(config.getOllamaUrl())
                 .isActive(config.getIsActive() == 1)
+                .isSystemConfig(config.getUserId() == 0L)
                 .remark(config.getRemark())
                 .createdAt(config.getCreatedAt())
                 .updatedAt(config.getUpdatedAt())
@@ -340,3 +367,4 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         return msg.length() > 100 ? msg.substring(0, 100) + "..." : msg;
     }
 }
+

@@ -21,22 +21,31 @@ CREATE TABLE IF NOT EXISTS sys_llm_config
     updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted     TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除（0=正常，1=已删除）',
 
-    UNIQUE KEY uk_user_active (user_id, is_active, deleted),
+    -- 注意：同一用户允许多个 is_active=0 的配置，仅限制每个用户只有一个 is_active=1
+    -- 使用普通索引而非唯一索引，通过业务逻辑保证唯一激活
+    INDEX idx_user_active (user_id, is_active),
     INDEX idx_user_id (user_id),
     INDEX idx_llm_mode (llm_mode)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COMMENT = 'LLM配置管理表';
 
--- 插入系统默认离线配置（user_id=0 表示系统级配置）
+-- 插入系统默认离线配置（user_id=0 表示系统级配置，默认启用）
 INSERT INTO sys_llm_config (user_id, config_name, llm_mode, chat_model, llm_model, embed_model,
                              ollama_url, is_active, remark)
 VALUES (0, 'Ollama 默认配置', 'offline', 'deepseek-r1:7b', 'qwen2.5:7b', 'bge-m3',
-        'http://localhost:11434', 1, '系统默认离线配置，使用 Ollama 三模型分工');
+        'http://localhost:11434', 1, '系统默认离线配置，使用 Ollama 三模型分工（对话/分析/向量）');
 
--- 插入系统默认在线配置示例（未启用）
+-- 插入系统默认在线配置：通义千问（未启用，需用户填写 API Key）
 INSERT INTO sys_llm_config (user_id, config_name, llm_mode, base_url, api_key, chat_model,
                              llm_model, embed_model, is_active, remark)
 VALUES (0, '通义千问（系统预设）', 'online',
         'https://dashscope.aliyuncs.com/compatible-mode', '', 'qwen-max', 'qwen-plus',
-        'text-embedding-v3', 0, '系统预设在线配置，需填写 ONLINE_API_KEY');
+        'text-embedding-v3', 0, '系统预设在线配置（阿里云 DashScope），需在环境变量中配置 ONLINE_API_KEY');
+
+-- 插入系统默认在线配置：DeepSeek（未启用，需用户填写 API Key）
+INSERT INTO sys_llm_config (user_id, config_name, llm_mode, base_url, api_key, chat_model,
+                             llm_model, embed_model, is_active, remark)
+VALUES (0, 'DeepSeek（系统预设）', 'online',
+        'https://api.deepseek.com', '', 'deepseek-chat', 'deepseek-chat',
+        'bge-m3', 0, '系统预设在线配置（DeepSeek 官方），需在环境变量中配置 ONLINE_API_KEY');

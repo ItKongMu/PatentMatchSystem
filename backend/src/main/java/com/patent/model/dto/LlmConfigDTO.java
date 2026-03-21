@@ -45,4 +45,7 @@ public class LlmConfigDTO {
 
     @Schema(description = "备注说明", example = "生产环境高质量配置")
     private String remark;
+
+    @Schema(description = "是否作为系统默认配置（仅管理员新增时有效，true=userId=0）")
+    private Boolean isSystemConfig;
 }

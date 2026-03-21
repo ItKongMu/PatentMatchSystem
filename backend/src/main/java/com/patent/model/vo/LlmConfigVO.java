@@ -51,6 +51,9 @@ public class LlmConfigVO {
     @Schema(description = "是否当前启用")
     private Boolean isActive;
 
+    @Schema(description = "是否为系统默认配置（user_id=0），系统配置前端只读，不允许删除")
+    private Boolean isSystemConfig;
+
     @Schema(description = "备注说明")
     private String remark;
 

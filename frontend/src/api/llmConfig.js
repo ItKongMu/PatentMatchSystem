@@ -12,7 +12,7 @@ export const getSystemStatus = () => {
 }
 
 /**
- * 获取当前用户所有配置列表
+ * 获取当前用户所有配置列表（含系统配置+用户自定义配置）
  */
 export const listConfigs = () => {
   return request.get('/llm-config/list')
@@ -26,7 +26,7 @@ export const getActiveConfig = () => {
 }
 
 /**
- * 保存或更新配置
+ * 保存或更新配置（用户自定义：离线/在线均支持）
  * @param {Object} data - 配置数据
  */
 export const saveConfig = (data) => {
@@ -70,4 +70,20 @@ export const listSystemConfigs = () => {
  */
 export const activateSystemConfig = (configId) => {
   return request.put(`/llm-config/system/${configId}/activate`)
+}
+
+/**
+ * 保存/更新系统级配置（管理员用）
+ * @param {Object} data - 配置数据
+ */
+export const saveSystemConfig = (data) => {
+  return request.post('/llm-config/system/save', data)
+}
+
+/**
+ * 删除系统级配置（管理员用）
+ * @param {number} configId - 配置ID
+ */
+export const deleteSystemConfig = (configId) => {
+  return request.delete(`/llm-config/system/${configId}`)
 }

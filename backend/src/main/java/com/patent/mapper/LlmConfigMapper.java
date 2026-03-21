@@ -8,7 +8,6 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
-import java.util.Optional;
 
 /**
  * LLM 配置 Mapper
@@ -31,6 +30,16 @@ public interface LlmConfigMapper extends BaseMapper<SysLlmConfig> {
      */
     @Select("SELECT * FROM sys_llm_config WHERE user_id = #{userId} AND deleted = 0 ORDER BY is_active DESC, created_at DESC")
     List<SysLlmConfig> findAllByUserId(@Param("userId") Long userId);
+
+    /**
+     * 查询系统默认配置（user_id=0）+ 用户自定义配置（合并展示）
+     * 系统配置在前，用户配置在后；启用的配置排在同类最前
+     *
+     * @param userId 用户ID（>0）
+     */
+    @Select("SELECT * FROM sys_llm_config WHERE (user_id = 0 OR user_id = #{userId}) AND deleted = 0 " +
+            "ORDER BY user_id ASC, is_active DESC, created_at DESC")
+    List<SysLlmConfig> findAllWithSystem(@Param("userId") Long userId);
 
     /**
      * 取消用户所有启用状态（同一用户只能有一个启用配置）
