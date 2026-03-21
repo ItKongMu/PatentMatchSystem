@@ -127,13 +127,11 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         if (config == null || config.getDeleted() == 1) {
             throw new BusinessException("配置不存在");
         }
-        // 系统配置由管理员激活（userId=0维度），用户配置由用户激活（userId维度）
+        // 系统配置：所有用户均可激活（选择使用哪个系统预设），管理员激活会影响全局默认
+        // 用户自定义配置：只能激活自己的
         boolean isSystemConfig = config.getUserId() == 0L;
         if (isSystemConfig) {
-            if (!isAdmin) {
-                throw new BusinessException("无权激活系统默认配置");
-            }
-            // 管理员激活系统配置：先取消所有系统配置的激活状态
+            // 先取消所有系统配置的激活状态
             llmConfigMapper.deactivateAllByUserId(0L);
         } else {
             if (!isAdmin && !config.getUserId().equals(userId)) {

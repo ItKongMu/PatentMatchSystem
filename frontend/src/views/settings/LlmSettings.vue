@@ -5,7 +5,7 @@
       <div class="header-title">
         <h2>模型配置</h2>
         <p class="subtitle">
-          配置页展示系统预设配置及您的自定义 Ollama 离线配置，在线配置由管理员统一管理
+          {{ isAdmin ? '管理员可新增/编辑离线和在线配置，并可修改系统默认配置' : '可新增/编辑自定义离线和在线配置，系统默认配置只读' }}
         </p>
       </div>
       <div class="system-status" v-if="systemStatus">
@@ -50,24 +50,14 @@
 
     <!-- 操作栏 -->
     <div class="toolbar">
-      <el-button type="primary" @click="openAddDialog">
+      <el-button type="primary" @click="openAddDialog()">
         <el-icon><Plus /></el-icon>
-        新增 Ollama 离线配置
+        新增配置
       </el-button>
       <el-button @click="loadData">
         <el-icon><Refresh /></el-icon>
         刷新
       </el-button>
-      <el-alert
-        class="toolbar-tip"
-        type="info"
-        :closable="false"
-        show-icon
-      >
-        <template #title>
-          <span>系统预设配置（在线/离线）只读展示，支持激活使用。如需使用在线 API，可激活系统预设在线配置，API Key 由管理员统一配置。</span>
-        </template>
-      </el-alert>
     </div>
 
     <!-- 配置列表 -->
@@ -100,8 +90,11 @@
                   plain
                   @click="handleActivate(config)"
                 >激活</el-button>
-                <!-- 系统配置只读，不提供编辑/删除 -->
-                <el-tag size="small" type="info" effect="plain" class="readonly-tag">只读</el-tag>
+                <template v-if="isAdmin">
+                  <el-button size="small" @click="openEditDialog(config)">编辑</el-button>
+                  <el-button size="small" type="danger" plain :disabled="config.isActive" @click="handleDelete(config)">删除</el-button>
+                </template>
+                <el-tag v-else size="small" type="info" effect="plain" class="readonly-tag">只读</el-tag>
               </div>
             </div>
 
@@ -142,7 +135,7 @@
       <div v-if="userConfigs.length > 0" class="config-group">
         <div class="group-label">
           <el-icon><User /></el-icon>
-          我的 Ollama 配置
+          我的自定义配置
         </div>
         <div v-for="config in userConfigs" :key="config.id" class="config-card">
           <el-card shadow="hover" :class="{ 'is-active': config.isActive }">
@@ -150,7 +143,9 @@
               <div class="config-name-row">
                 <el-icon v-if="config.isActive" class="active-badge"><CircleCheckFilled /></el-icon>
                 <span class="config-name">{{ config.configName }}</span>
-                <el-tag size="small" type="success">Ollama</el-tag>
+                <el-tag size="small" :type="config.llmMode === 'offline' ? 'success' : 'primary'">
+                  {{ config.llmMode === 'offline' ? 'Ollama' : '在线 API' }}
+                </el-tag>
                 <el-tag v-if="config.isActive" size="small" type="warning" effect="dark">启用中</el-tag>
               </div>
               <div class="config-actions">
@@ -170,7 +165,18 @@
             </div>
 
             <div class="config-details">
-              <div class="detail-row" v-if="config.ollamaUrl">
+              <div class="detail-row" v-if="config.llmMode === 'online' && config.baseUrl">
+                <span class="detail-label">API BaseURL</span>
+                <span class="detail-value url">{{ config.baseUrl }}</span>
+              </div>
+              <div class="detail-row" v-if="config.llmMode === 'online'">
+                <span class="detail-label">API Key</span>
+                <span class="detail-value">
+                  <el-tag v-if="config.hasApiKey" size="small" type="success" effect="plain">已配置</el-tag>
+                  <el-tag v-else size="small" type="warning" effect="plain">未配置</el-tag>
+                </span>
+              </div>
+              <div class="detail-row" v-if="config.llmMode === 'offline' && config.ollamaUrl">
                 <span class="detail-label">Ollama 地址</span>
                 <span class="detail-value url">{{ config.ollamaUrl }}</span>
               </div>
@@ -195,26 +201,19 @@
       <div v-if="userConfigs.length === 0 && !loading && systemConfigs.length > 0" class="user-empty-tip">
         <el-text type="info">
           <el-icon><InfoFilled /></el-icon>
-          暂无自定义 Ollama 配置，点击「新增 Ollama 离线配置」添加本地模型配置
+          暂无自定义配置，点击「新增配置」添加离线或在线模型配置
         </el-text>
       </div>
     </div>
 
-    <!-- 新增/编辑对话框（仅限离线 Ollama 配置） -->
+    <!-- 新增/编辑对话框（离线 + 在线双模式） -->
     <el-dialog
       v-model="dialogVisible"
-      :title="editingConfig ? '编辑 Ollama 离线配置' : '新增 Ollama 离线配置'"
-      width="580px"
+      :title="dialogTitle"
+      width="600px"
       :close-on-click-modal="false"
       @close="resetForm"
     >
-      <el-alert
-        type="info"
-        :closable="false"
-        style="margin-bottom: 20px;"
-        title="仅支持配置 Ollama 离线模式。如需使用在线 API（通义千问、DeepSeek等），请激活系统预设配置。"
-        show-icon
-      />
       <el-form
         ref="formRef"
         :model="form"
@@ -223,28 +222,70 @@
         label-position="right"
       >
         <el-form-item label="配置名称" prop="configName">
-          <el-input v-model="form.configName" placeholder="如：本地 DeepSeek、开发环境 Ollama" maxlength="64" show-word-limit />
+          <el-input v-model="form.configName" placeholder="如：本地 DeepSeek、通义千问生产" maxlength="64" show-word-limit />
         </el-form-item>
 
-        <el-divider content-position="left">Ollama 配置</el-divider>
-        <el-form-item label="Ollama 地址">
-          <el-input v-model="form.ollamaUrl" placeholder="http://localhost:11434" />
+        <el-form-item label="模式" prop="llmMode">
+          <el-radio-group v-model="form.llmMode" :disabled="isEditingSystemConfig && !isAdmin">
+            <el-radio-button value="offline">离线 (Ollama)</el-radio-button>
+            <el-radio-button value="online">在线 API</el-radio-button>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item label="对话模型" prop="chatModel">
-          <el-select v-model="form.chatModel" allow-create filterable placeholder="选择或输入模型名">
-            <el-option v-for="m in ollamaChatModels" :key="m" :label="m" :value="m" />
-          </el-select>
+
+        <!-- 管理员新增时可选是否为系统配置 -->
+        <el-form-item v-if="isAdmin && !editingConfig" label="配置归属">
+          <el-checkbox v-model="form.isSystemConfig">设为系统默认配置（所有用户可见）</el-checkbox>
         </el-form-item>
-        <el-form-item label="分析模型">
-          <el-select v-model="form.llmModel" allow-create filterable placeholder="选择或输入模型名">
-            <el-option v-for="m in ollamaLlmModels" :key="m" :label="m" :value="m" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="向量模型">
-          <el-select v-model="form.embedModel" allow-create filterable placeholder="选择或输入模型名">
-            <el-option v-for="m in ollamaEmbedModels" :key="m" :label="m" :value="m" />
-          </el-select>
-        </el-form-item>
+
+        <!-- 离线模式字段 -->
+        <template v-if="form.llmMode === 'offline'">
+          <el-divider content-position="left">Ollama 配置</el-divider>
+          <el-form-item label="Ollama 地址">
+            <el-input v-model="form.ollamaUrl" placeholder="http://localhost:11434" />
+          </el-form-item>
+          <el-form-item label="对话模型" prop="chatModel">
+            <el-select v-model="form.chatModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
+              <el-option v-for="m in ollamaChatModels" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="分析模型">
+            <el-select v-model="form.llmModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
+              <el-option v-for="m in ollamaLlmModels" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="向量模型">
+            <el-select v-model="form.embedModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
+              <el-option v-for="m in ollamaEmbedModels" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+        </template>
+
+        <!-- 在线模式字段 -->
+        <template v-if="form.llmMode === 'online'">
+          <el-divider content-position="left">在线 API 配置</el-divider>
+          <el-form-item label="API BaseURL" prop="baseUrl">
+            <el-input v-model="form.baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" />
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input v-model="form.apiKey" type="password" show-password
+              :placeholder="editingConfig ? '留空则保留原有 Key' : '请输入 API Key'" />
+          </el-form-item>
+          <el-form-item label="对话模型" prop="chatModel">
+            <el-select v-model="form.chatModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
+              <el-option v-for="m in onlineChatModels" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="分析模型">
+            <el-select v-model="form.llmModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
+              <el-option v-for="m in onlineLlmModels" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="向量模型">
+            <el-select v-model="form.embedModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
+              <el-option v-for="m in onlineEmbedModels" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+        </template>
 
         <el-divider />
         <el-form-item label="备注">
@@ -283,13 +324,18 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  CircleCheckFilled, Plus, Refresh, Monitor,
+  CircleCheckFilled, Plus, Refresh,
   Connection, Setting, User, InfoFilled
 } from '@element-plus/icons-vue'
 import {
   getSystemStatus, listConfigs, getActiveConfig,
-  saveConfig, activateConfig, deleteConfig, testConnection
+  saveConfig, activateConfig, deleteConfig, testConnection,
+  saveSystemConfig, deleteSystemConfig
 } from '@/api/llmConfig'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.isAdmin)
 
 // ==================== 状态 ====================
 const loading = ref(false)
@@ -304,33 +350,47 @@ const systemStatus = ref(null)
 const activeConfig = ref(null)
 const configs = ref([])
 
-// ==================== 计算属性：分组 ====================
+// ==================== 计算属性 ====================
 const systemConfigs = computed(() => configs.value.filter(c => c.isSystemConfig))
 const userConfigs = computed(() => configs.value.filter(c => !c.isSystemConfig))
+const isEditingSystemConfig = computed(() => editingConfig.value?.isSystemConfig === true)
+const dialogTitle = computed(() => {
+  if (!editingConfig.value) return '新增配置'
+  return isEditingSystemConfig.value ? '编辑系统默认配置' : '编辑配置'
+})
 
-// ==================== 表单（固定为离线模式） ====================
+// ==================== 表单 ====================
 const defaultForm = {
   id: null,
   configName: '',
-  llmMode: 'offline',   // 固定离线，不允许用户切换
+  llmMode: 'offline',
   chatModel: '',
   llmModel: '',
   embedModel: '',
   ollamaUrl: 'http://localhost:11434',
+  baseUrl: '',
+  apiKey: '',
+  isSystemConfig: false,
   remark: ''
 }
 
 const form = reactive({ ...defaultForm })
 
-const formRules = {
+const formRules = computed(() => ({
   configName: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
-  chatModel: [{ required: true, message: '请填写对话模型名称', trigger: 'blur' }]
-}
+  chatModel: [{ required: true, message: '请填写对话模型名称', trigger: 'blur' }],
+  baseUrl: form.llmMode === 'online'
+    ? [{ required: true, message: '在线模式需填写 API BaseURL', trigger: 'blur' }]
+    : []
+}))
 
 // ==================== 常量数据 ====================
 const ollamaChatModels = ['deepseek-r1:7b', 'deepseek-r1:14b', 'qwen2.5:7b', 'qwen2.5:14b', 'llama3.2:3b']
 const ollamaLlmModels = ['qwen2.5:7b', 'qwen2.5:3b', 'deepseek-r1:7b', 'llama3.2:3b']
 const ollamaEmbedModels = ['bge-m3', 'nomic-embed-text', 'mxbai-embed-large']
+const onlineChatModels = ['qwen-max', 'qwen-plus', 'qwen-turbo', 'deepseek-chat', 'deepseek-reasoner', 'gpt-4o', 'gpt-4o-mini']
+const onlineLlmModels = ['qwen-plus', 'qwen-turbo', 'deepseek-chat', 'gpt-4o-mini']
+const onlineEmbedModels = ['text-embedding-v3', 'text-embedding-v2', 'text-embedding-ada-002']
 
 // ==================== 方法 ====================
 const loadData = async () => {
@@ -359,18 +419,21 @@ const openAddDialog = () => {
 }
 
 const openEditDialog = (config) => {
-  // 只允许编辑用户自定义配置
-  if (config.isSystemConfig) return
+  // 普通用户不能编辑系统配置
+  if (config.isSystemConfig && !isAdmin.value) return
   editingConfig.value = config
   testResult.value = null
   Object.assign(form, {
     id: config.id,
     configName: config.configName,
-    llmMode: 'offline',
+    llmMode: config.llmMode || 'offline',
     chatModel: config.chatModel || '',
     llmModel: config.llmModel || '',
     embedModel: config.embedModel || '',
     ollamaUrl: config.ollamaUrl || 'http://localhost:11434',
+    baseUrl: config.baseUrl || '',
+    apiKey: '',   // 不回填 apiKey，留空表示不修改
+    isSystemConfig: config.isSystemConfig || false,
     remark: config.remark || ''
   })
   dialogVisible.value = true
@@ -387,7 +450,12 @@ const handleSave = async () => {
 
   saveLoading.value = true
   try {
-    await saveConfig({ ...form, llmMode: 'offline' })
+    // 管理员编辑系统配置走专用接口
+    if (isAdmin.value && (form.isSystemConfig || isEditingSystemConfig.value)) {
+      await saveSystemConfig({ ...form })
+    } else {
+      await saveConfig({ ...form })
+    }
     ElMessage.success(editingConfig.value ? '配置更新成功' : '配置新增成功')
     dialogVisible.value = false
     await loadData()
@@ -409,17 +477,17 @@ const handleActivate = async (config) => {
 }
 
 const handleDelete = (config) => {
-  if (config.isSystemConfig) {
-    ElMessage.warning('系统预设配置不允许删除')
-    return
-  }
   ElMessageBox.confirm(
     `确定要删除配置「${config.configName}」吗？`,
     '删除确认',
     { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' }
   ).then(async () => {
     try {
-      await deleteConfig(config.id)
+      if (config.isSystemConfig) {
+        await deleteSystemConfig(config.id)
+      } else {
+        await deleteConfig(config.id)
+      }
       ElMessage.success('配置已删除')
       await loadData()
     } catch (e) {
@@ -432,7 +500,7 @@ const handleTest = async () => {
   testLoading.value = true
   testResult.value = null
   try {
-    const res = await testConnection({ ...form, llmMode: 'offline' })
+    const res = await testConnection({ ...form })
     testResult.value = res.data
   } catch (e) {
     testResult.value = { success: false, message: e.message || '请求失败', responseTimeMs: 0 }
