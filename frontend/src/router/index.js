@@ -97,6 +97,12 @@ const routes = [
         name: 'LlmSettings',
         component: () => import('@/views/settings/LlmSettings.vue'),
         meta: { title: 'LLM配置', icon: 'Setting' }
+      },
+      {
+        path: 'settings/user-management',
+        name: 'UserManagement',
+        component: () => import('@/views/settings/UserManagement.vue'),
+        meta: { title: '用户管理', icon: 'User', requiresAdmin: true }
       }
     ]
   },
@@ -122,12 +128,14 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
   
   // 检查路由链中是否有任何路由需要认证
-  // to.matched 包含了从根路由到当前路由的所有匹配记录
-  const requiresAuth = to.matched.some(record => record.meta.requiresAuth === true) || 
+  const requiresAuth = to.matched.some(record => record.meta.requiresAuth === true) ||
                        (to.matched.length > 0 && to.matched.every(record => record.meta.requiresAuth !== false))
   
   // 检查是否明确不需要认证（如登录页、注册页）
   const explicitlyNoAuth = to.meta.requiresAuth === false
+
+  // 检查是否需要管理员权限
+  const requiresAdmin = to.matched.some(record => record.meta.requiresAdmin === true)
   
   if (!explicitlyNoAuth && requiresAuth && !token) {
     // 需要认证但未登录
@@ -135,6 +143,15 @@ router.beforeEach((to, from, next) => {
   } else if (token && (to.name === 'Login' || to.name === 'Register')) {
     // 已登录访问登录/注册页面
     next({ path: '/' })
+  } else if (requiresAdmin && token) {
+    // 需要管理员权限，从 localStorage 读取用户信息进行校验
+    const userInfo = JSON.parse(localStorage.getItem('userInfo') || 'null')
+    if (!userInfo || userInfo.role !== 'admin') {
+      // 非管理员访问管理员页面，重定向首页
+      next({ path: '/' })
+    } else {
+      next()
+    }
   } else {
     next()
   }

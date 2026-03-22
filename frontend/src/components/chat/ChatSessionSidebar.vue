@@ -3,20 +3,25 @@
     <!-- 侧边栏头部 -->
     <div class="sidebar-header">
       <h3 v-if="!collapsed">历史会话</h3>
-      <el-button 
+      <el-button
         v-if="!collapsed"
-        type="primary" 
-        size="small" 
+        type="primary"
+        size="small"
         @click="handleNewSession"
       >
         <el-icon><Plus /></el-icon>
         新对话
       </el-button>
-      <el-button 
-        text 
-        :icon="collapsed ? Expand : Fold" 
-        @click="toggleCollapse"
-      />
+      <!-- 折叠/展开按钮，固定在右侧边缘 -->
+      <button class="collapse-toggle-btn" @click="toggleCollapse" :title="collapsed ? '展开历史会话' : '收起历史会话'">
+        <svg
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          :style="{ transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }"
+        >
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </button>
     </div>
 
     <!-- 标签页切换 -->
@@ -391,12 +396,13 @@ const formatTime = (dateStr) => {
   display: flex;
   flex-direction: column;
   transition: width var(--duration-normal) var(--ease-default);
+  position: relative;
 
   &.collapsed {
     width: 48px;
 
     .sidebar-header {
-      padding: var(--space-3);
+      padding: var(--space-3) 0;
       justify-content: center;
     }
   }
@@ -408,18 +414,47 @@ const formatTime = (dateStr) => {
   justify-content: space-between;
   padding: var(--space-4);
   border-bottom: 1px solid var(--color-border);
+  gap: var(--space-2);
 
   h3 {
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     color: var(--color-text-primary);
     margin: 0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
   .el-button {
-    &:first-of-type {
-      flex-shrink: 0;
-    }
+    flex-shrink: 0;
+  }
+}
+
+// 折叠/展开按钮
+.collapse-toggle-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-default);
+  padding: 0;
+
+  &:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+
+  .collapsed & {
+    margin: 0 auto;
   }
 }
 

@@ -17,4 +17,10 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
      */
     @Select("SELECT * FROM sys_user WHERE username = #{username}")
     SysUser selectByUsername(@Param("username") String username);
+
+    /**
+     * 统计用户的匹配历史次数
+     */
+    @Select("SELECT COUNT(*) FROM match_record WHERE user_id = #{userId}")
+    Long countMatchRecordsByUserId(@Param("userId") Long userId);
 }

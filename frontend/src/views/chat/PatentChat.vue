@@ -1,39 +1,9 @@
 <template>
   <div class="page-container patent-chat-page">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">智能对话检索</h1>
-        <p class="page-desc">基于大语言模型的自然语言专利检索助手，支持多轮对话和智能理解</p>
-      </div>
-      <div class="header-actions">
-        <el-button 
-          type="default" 
-          plain 
-          @click="toggleSidebar"
-        >
-          <el-icon><List /></el-icon>
-          {{ showSidebar ? '隐藏' : '显示' }}历史
-        </el-button>
-        <el-button 
-          v-if="sessionId" 
-          type="info" 
-          plain 
-          @click="handleNewSession"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          新对话
-        </el-button>
-      </div>
-    </div>
-
     <!-- 聊天主体区域（包含侧边栏和对话区） -->
     <div class="chat-main-area">
-      <!-- 会话侧边栏 -->
-      <ChatSessionSidebar v-if="showSidebar" class="session-sidebar-wrapper" />
+      <!-- 会话侧边栏（始终渲染，内部控制折叠） -->
+      <ChatSessionSidebar class="session-sidebar-wrapper" />
 
       <!-- 对话主体区域 -->
       <div class="chat-container card">
@@ -272,7 +242,6 @@
 import { ref, onMounted, nextTick, watch, onUnmounted, onActivated, onDeactivated, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { List } from '@element-plus/icons-vue'
 import { chatApi } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 import { storeToRefs } from 'pinia'
@@ -301,7 +270,6 @@ const {
 const messageListRef = ref(null)
 const currentAbortController = ref(null)  // 用于取消流式请求
 const isInitialized = ref(false)
-const showSidebar = ref(true)  // 侧边栏显示状态
 
 // ==================== 图谱相关 ====================
 // 存储各消息索引对应的图谱 DOM 元素 ref 和 ECharts 实例
@@ -411,11 +379,6 @@ const openFullGraph = (graphData) => {
     path: '/graph',
     query: { type: graphData.queryType, value: graphData.queryValue }
   })
-}
-
-// 切换侧边栏显示
-const toggleSidebar = () => {
-  showSidebar.value = !showSidebar.value
 }
 
 // 发送消息（流式模式）
@@ -606,16 +569,22 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .patent-chat-page {
-  max-width: 1200px;
-  margin: 0 auto;
+  // 精确高度：视口 - 顶部导航(64px) - 底部(48px) - layout-content上下padding(48px)
+  // 同时覆盖 .page-container 的 padding，让聊天区域完全撑满内容区
+  margin: calc(-1 * var(--space-6));
+  padding: var(--space-6);
+  height: calc(100vh - 64px - 48px - 48px);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
-// 聊天主体区域布局
+// 聊天主体区域布局 - 填满剩余高度
 .chat-main-area {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: var(--space-4);
-  height: calc(100vh - 180px);
-  min-height: 500px;
 }
 
 // 会话侧边栏包装器
@@ -624,28 +593,6 @@ onUnmounted(() => {
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
-}
-
-// 页面头部
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--space-6);
-
-  .page-desc {
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    margin: var(--space-2) 0 0 0;
-  }
-}
-
-.header-actions {
-  .el-button {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
 }
 
 // 对话容器
@@ -1196,13 +1143,14 @@ onUnmounted(() => {
 
 // 响应式
 @media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    gap: var(--space-4);
+  .patent-chat-page {
+    height: auto;
+    min-height: calc(100vh - 64px - 48px - 32px);
   }
 
   .chat-main-area {
     flex-direction: column;
+    flex: none;
     height: auto;
   }
 

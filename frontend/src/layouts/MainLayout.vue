@@ -161,6 +161,18 @@
             </el-icon>
             <template #title>LLM 配置</template>
           </el-menu-item>
+
+          <el-menu-item v-if="userStore.isAdmin" index="/settings/user-management">
+            <el-icon>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+            </el-icon>
+            <template #title>用户管理</template>
+          </el-menu-item>
         </div>
       </el-menu>
       
@@ -214,7 +226,7 @@
               </el-avatar>
               <div class="user-detail">
                 <span class="username">{{ userStore.nickname }}</span>
-                <span class="user-role">研究员</span>
+                <span class="user-role">{{ userStore.isAdmin ? '管理员' : '研究员' }}</span>
               </div>
               <el-icon class="dropdown-icon"><ArrowDown /></el-icon>
             </div>

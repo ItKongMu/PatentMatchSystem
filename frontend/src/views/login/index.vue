@@ -105,6 +105,7 @@
           
           <el-form-item class="form-options">
             <el-checkbox v-model="rememberMe">记住登录状态</el-checkbox>
+            <span class="forgot-password" @click="showForgotDialog = true">忘记密码？</span>
           </el-form-item>
           
           <el-form-item>
@@ -125,6 +126,53 @@
         </div>
       </div>
     </div>
+
+    <!-- 忘记密码弹窗 -->
+    <el-dialog
+      v-model="showForgotDialog"
+      title="忘记密码"
+      width="420px"
+      :close-on-click-modal="true"
+      class="forgot-dialog"
+    >
+      <div class="forgot-content">
+        <div class="forgot-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <h3>联系管理员重置密码</h3>
+        <p class="forgot-desc">
+          如果您忘记了密码，请联系系统管理员，提供以下信息以验证您的身份：
+        </p>
+        <ul class="forgot-steps">
+          <li>
+            <el-icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></el-icon>
+            您的用户名（登录账号）
+          </li>
+          <li>
+            <el-icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></el-icon>
+            您的真实姓名或昵称
+          </li>
+          <li>
+            <el-icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></el-icon>
+            其他可以证明身份的信息
+          </li>
+        </ul>
+        <el-alert
+          title="管理员将在系统设置 → 用户密码管理中为您重置密码"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-top: 16px;"
+        />
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="showForgotDialog = false">我知道了</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -142,6 +190,7 @@ const userStore = useUserStore()
 const loginFormRef = ref(null)
 const loading = ref(false)
 const rememberMe = ref(false)
+const showForgotDialog = ref(false)
 
 const loginForm = reactive({
   username: '',
@@ -385,9 +434,27 @@ const handleLogin = async () => {
 }
 
 .form-options {
+  :deep(.el-form-item__content) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
   :deep(.el-checkbox__label) {
     font-size: var(--text-sm);
     color: var(--color-text-muted);
+  }
+
+  .forgot-password {
+    font-size: var(--text-sm);
+    color: var(--color-accent);
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-default);
+
+    &:hover {
+      color: var(--color-accent-dark);
+      text-decoration: underline;
+    }
   }
 }
 
@@ -482,6 +549,65 @@ const handleLogin = async () => {
 
   .form-title {
     font-size: var(--text-2xl);
+  }
+}
+
+// 忘记密码弹窗样式
+:global(.forgot-dialog) {
+  .el-dialog__body {
+    padding-top: var(--space-4);
+  }
+}
+
+.forgot-content {
+  text-align: center;
+
+  .forgot-icon {
+    margin-bottom: var(--space-4);
+    color: var(--color-accent);
+    display: flex;
+    justify-content: center;
+  }
+
+  h3 {
+    font-family: var(--font-heading);
+    font-size: var(--text-xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-3);
+  }
+
+  .forgot-desc {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-4);
+    line-height: var(--leading-relaxed);
+  }
+
+  .forgot-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      font-size: var(--text-sm);
+      color: var(--color-text-secondary);
+      padding: var(--space-2) var(--space-3);
+      background-color: var(--color-bg-secondary);
+      border-radius: var(--radius-md);
+
+      .el-icon {
+        color: #16a34a;
+        flex-shrink: 0;
+      }
+    }
   }
 }
 </style>

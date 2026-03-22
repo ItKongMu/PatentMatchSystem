@@ -1,6 +1,6 @@
 <template>
-  <div class="llm-settings">
-    <!-- 页面标题 + 系统状态 -->
+  <div class="llm-settings-page">
+    <!-- 页面标题 -->
     <div class="page-header">
       <div class="header-title">
         <h2>模型配置</h2>
@@ -8,217 +8,261 @@
           {{ isAdmin ? '管理员可新增/编辑离线和在线配置，并可修改系统默认配置' : '可新增/编辑自定义离线和在线配置，系统默认配置只读' }}
         </p>
       </div>
-      <div class="system-status" v-if="activeConfig">
-        <el-tag
-          :type="activeConfig.llmMode === 'offline' ? 'success' : 'primary'"
-          size="large"
-          effect="light"
-        >
-          <span class="status-dot" :class="activeConfig.llmMode"></span>
-          {{ activeConfig.llmMode === 'offline' ? '离线模式' : '在线模式' }}
-        </el-tag>
+      <div class="header-actions">
+        <el-button type="primary" @click="openAddDialog()">
+          <el-icon><Plus /></el-icon>
+          新增配置
+        </el-button>
+        <el-button @click="loadData" :loading="loading">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </div>
+    </div>
+
+    <!-- 当前启用配置概览 Banner -->
+    <div class="active-banner" v-if="activeConfig">
+      <div class="active-banner-left">
+        <el-icon class="banner-check-icon"><CircleCheckFilled /></el-icon>
+        <div class="banner-info">
+          <div class="banner-title">
+            <span class="banner-label">当前启用</span>
+            <strong class="banner-name">{{ activeConfig.configName }}</strong>
+            <el-tag size="small" :type="activeConfig.llmMode === 'offline' ? 'success' : 'primary'" effect="dark">
+              {{ activeConfig.llmMode === 'offline' ? '离线模式' : '在线模式' }}
+            </el-tag>
+            <el-tag v-if="activeConfig.isSystemConfig" size="small" type="info" effect="plain">系统预设</el-tag>
+          </div>
+          <div class="banner-models">
+            <span v-if="activeConfig.chatModel" class="banner-model-item">
+              <span class="banner-model-label">对话</span>
+              <code>{{ activeConfig.chatModel }}</code>
+            </span>
+            <span v-if="activeConfig.llmModel" class="banner-model-item">
+              <span class="banner-model-label">分析</span>
+              <code>{{ activeConfig.llmModel }}</code>
+            </span>
+            <span v-if="activeConfig.embedModel" class="banner-model-item">
+              <span class="banner-model-label">向量</span>
+              <code>{{ activeConfig.embedModel }}</code>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div class="banner-status">
+        <span class="status-pulse" :class="activeConfig.llmMode === 'offline' ? 'offline' : 'online'"></span>
+        <span class="status-text">{{ activeConfig.llmMode === 'offline' ? '离线模式' : '在线模式' }}</span>
         <span class="status-model">{{ activeConfig.chatModel }}</span>
       </div>
     </div>
 
-    <!-- 当前启用配置概览 -->
-    <el-card class="active-config-card" v-if="activeConfig" shadow="never">
-      <div class="active-config-header">
-        <el-icon class="active-icon"><CircleCheckFilled /></el-icon>
-        <span class="active-label">当前启用</span>
-        <strong>{{ activeConfig.configName }}</strong>
-        <el-tag size="small" :type="activeConfig.llmMode === 'offline' ? 'success' : 'primary'">
-          {{ activeConfig.llmMode === 'offline' ? 'Ollama 离线' : '在线 API' }}
-        </el-tag>
-        <el-tag v-if="activeConfig.isSystemConfig" size="small" type="info" effect="plain">系统预设</el-tag>
-      </div>
-      <div class="active-config-models">
-        <div class="model-item" v-if="activeConfig.chatModel">
-          <span class="model-label">对话模型</span>
-          <el-tag size="small" effect="plain">{{ activeConfig.chatModel }}</el-tag>
-        </div>
-        <div class="model-item" v-if="activeConfig.llmModel">
-          <span class="model-label">分析模型</span>
-          <el-tag size="small" effect="plain">{{ activeConfig.llmModel }}</el-tag>
-        </div>
-        <div class="model-item" v-if="activeConfig.embedModel">
-          <span class="model-label">向量模型</span>
-          <el-tag size="small" effect="plain">{{ activeConfig.embedModel }}</el-tag>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 操作栏 -->
-    <div class="toolbar">
-      <el-button type="primary" @click="openAddDialog()">
-        <el-icon><Plus /></el-icon>
-        新增配置
-      </el-button>
-      <el-button @click="loadData">
-        <el-icon><Refresh /></el-icon>
-        刷新
-      </el-button>
-    </div>
-
     <!-- 配置列表 -->
     <div class="config-list" v-loading="loading">
-      <el-empty v-if="configs.length === 0 && !loading" description="暂无配置，点击「新增 Ollama 离线配置」添加" />
+      <el-empty v-if="configs.length === 0 && !loading" description="暂无配置，点击「新增配置」添加" />
 
-      <!-- 系统预设配置分组 -->
-      <div v-if="systemConfigs.length > 0" class="config-group">
-        <div class="group-label">
-          <el-icon><Setting /></el-icon>
-          系统预设配置
-        </div>
-        <div v-for="config in systemConfigs" :key="config.id" class="config-card">
-          <el-card shadow="hover" :class="{ 'is-active': config.isActive }">
-            <div class="config-card-header">
-              <div class="config-name-row">
-                <el-icon v-if="config.isActive" class="active-badge"><CircleCheckFilled /></el-icon>
-                <span class="config-name">{{ config.configName }}</span>
-                <el-tag size="small" :type="config.llmMode === 'offline' ? 'success' : 'primary'">
-                  {{ config.llmMode === 'offline' ? 'Ollama' : '在线 API' }}
-                </el-tag>
-                <el-tag size="small" type="info" effect="plain">系统预设</el-tag>
-                <el-tag v-if="config.isActive" size="small" type="warning" effect="dark">启用中</el-tag>
-              </div>
-              <div class="config-actions">
-                <el-button
-                  v-if="!config.isActive"
-                  size="small"
-                  type="primary"
-                  plain
-                  @click="handleActivate(config)"
-                >激活</el-button>
-                <template v-if="isAdmin">
-                  <el-button size="small" @click="openEditDialog(config)">编辑</el-button>
-                  <el-button size="small" type="danger" plain :disabled="config.isActive" @click="handleDelete(config)">删除</el-button>
-                </template>
-                <el-tag v-else size="small" type="info" effect="plain" class="readonly-tag">只读</el-tag>
-              </div>
+      <!-- ===== 系统预设配置分组 ===== -->
+      <div v-if="systemConfigs.length > 0" class="section-block system-section">
+        <div class="section-header system-section-header">
+          <div class="section-header-left">
+            <div class="section-icon system-icon">
+              <el-icon><Setting /></el-icon>
             </div>
+            <div>
+              <div class="section-title">系统预设配置</div>
+              <div class="section-desc">由管理员内置，所有用户可见，普通用户只读</div>
+            </div>
+          </div>
+          <el-tag type="info" size="small" effect="plain">共 {{ systemConfigs.length }} 项</el-tag>
+        </div>
 
-            <div class="config-details">
-              <div class="detail-row" v-if="config.llmMode === 'online' && config.baseUrl">
-                <span class="detail-label">API BaseURL</span>
-                <span class="detail-value url">{{ config.baseUrl }}</span>
-              </div>
-              <div class="detail-row" v-if="config.llmMode === 'online'">
-                <span class="detail-label">API Key</span>
-                <span class="detail-value apikey-row">
-                  <template v-if="config.hasApiKey">
-                    <span class="apikey-masked">{{ getApiKeyState(config.id).visible ? getApiKeyState(config.id).value : (config.apiKeyMasked || '••••••••') }}</span>
-                    <el-button link size="small" :loading="getApiKeyState(config.id).loading" @click="toggleApiKeyVisible(config)">
-                      <el-icon><View /></el-icon>
-                    </el-button>
-                    <el-button link size="small" @click="copyApiKey(config)">
-                      <el-icon><CopyDocument /></el-icon>
-                    </el-button>
-                  </template>
-                  <el-tag v-else size="small" type="warning" effect="plain">未配置（需管理员设置）</el-tag>
-                </span>
-              </div>
-              <div class="detail-row" v-if="config.llmMode === 'offline' && config.ollamaUrl">
-                <span class="detail-label">Ollama 地址</span>
-                <span class="detail-value url">{{ config.ollamaUrl }}</span>
-              </div>
-              <div class="detail-row models-row">
-                <span class="detail-label">模型配置</span>
-                <div class="models-tags">
-                  <el-tag v-if="config.chatModel" size="small" effect="plain">对话: {{ config.chatModel }}</el-tag>
-                  <el-tag v-if="config.llmModel" size="small" effect="plain">分析: {{ config.llmModel }}</el-tag>
-                  <el-tag v-if="config.embedModel" size="small" effect="plain">向量: {{ config.embedModel }}</el-tag>
+        <el-card shadow="never" class="table-card">
+          <el-table :data="systemConfigs" row-key="id" stripe class="config-table">
+            <!-- 配置名称（含状态指示） -->
+            <el-table-column label="配置名称" min-width="200">
+              <template #default="{ row }">
+                <div class="name-cell">
+                  <el-icon v-if="row.isActive" class="row-active-icon"><CircleCheckFilled /></el-icon>
+                  <span v-else class="row-inactive-dot"></span>
+                  <span class="config-name-text" :class="{ 'is-active-name': row.isActive }">{{ row.configName }}</span>
+                  <el-tag v-if="row.isActive" size="small" type="warning" effect="dark" class="active-tag">启用中</el-tag>
                 </div>
-              </div>
-              <div class="detail-row" v-if="config.remark">
-                <span class="detail-label">备注</span>
-                <span class="detail-value muted">{{ config.remark }}</span>
-              </div>
-            </div>
-          </el-card>
-        </div>
-      </div>
+              </template>
+            </el-table-column>
 
-      <!-- 用户自定义配置分组 -->
-      <div v-if="userConfigs.length > 0" class="config-group">
-        <div class="group-label">
-          <el-icon><User /></el-icon>
-          我的自定义配置
-        </div>
-        <div v-for="config in userConfigs" :key="config.id" class="config-card">
-          <el-card shadow="hover" :class="{ 'is-active': config.isActive }">
-            <div class="config-card-header">
-              <div class="config-name-row">
-                <el-icon v-if="config.isActive" class="active-badge"><CircleCheckFilled /></el-icon>
-                <span class="config-name">{{ config.configName }}</span>
-                <el-tag size="small" :type="config.llmMode === 'offline' ? 'success' : 'primary'">
-                  {{ config.llmMode === 'offline' ? 'Ollama' : '在线 API' }}
+            <!-- 类型 -->
+            <el-table-column label="类型" width="115" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.llmMode === 'offline' ? 'success' : 'primary'" size="small" effect="plain">
+                  {{ row.llmMode === 'offline' ? 'Ollama 离线' : '在线 API' }}
                 </el-tag>
-                <el-tag v-if="config.isActive" size="small" type="warning" effect="dark">启用中</el-tag>
-              </div>
-              <div class="config-actions">
-                <el-button
-                  v-if="!config.isActive"
-                  size="small"
-                  type="primary"
-                  plain
-                  @click="handleActivate(config)"
-                >激活</el-button>
-                <el-button size="small" @click="openEditDialog(config)">编辑</el-button>
-                <el-button size="small" type="danger" plain
-                  @click="handleDelete(config)"
-                  :disabled="config.isActive"
-                >删除</el-button>
-              </div>
-            </div>
+              </template>
+            </el-table-column>
 
-            <div class="config-details">
-              <div class="detail-row" v-if="config.llmMode === 'online' && config.baseUrl">
-                <span class="detail-label">API BaseURL</span>
-                <span class="detail-value url">{{ config.baseUrl }}</span>
-              </div>
-              <div class="detail-row" v-if="config.llmMode === 'online'">
-                <span class="detail-label">API Key</span>
-                <span class="detail-value apikey-row">
-                  <template v-if="config.hasApiKey">
-                    <span class="apikey-masked">{{ getApiKeyState(config.id).visible ? getApiKeyState(config.id).value : (config.apiKeyMasked || '••••••••') }}</span>
-                    <el-button link size="small" :loading="getApiKeyState(config.id).loading" @click="toggleApiKeyVisible(config)">
-                      <el-icon><View /></el-icon>
-                    </el-button>
-                    <el-button link size="small" @click="copyApiKey(config)">
-                      <el-icon><CopyDocument /></el-icon>
-                    </el-button>
-                  </template>
+            <!-- 地址/URL -->
+            <el-table-column label="接入地址" min-width="180">
+              <template #default="{ row }">
+                <span class="url-text">{{ row.llmMode === 'online' ? row.baseUrl : row.ollamaUrl }}</span>
+              </template>
+            </el-table-column>
+
+            <!-- 模型 -->
+            <el-table-column label="模型配置" min-width="220">
+              <template #default="{ row }">
+                <div class="model-tags-cell">
+                  <el-tag v-if="row.chatModel" size="small" effect="plain" type="primary">对话: {{ row.chatModel }}</el-tag>
+                  <el-tag v-if="row.llmModel" size="small" effect="plain" type="success">分析: {{ row.llmModel }}</el-tag>
+                  <el-tag v-if="row.embedModel" size="small" effect="plain" type="info">向量: {{ row.embedModel }}</el-tag>
+                </div>
+              </template>
+            </el-table-column>
+
+            <!-- API Key -->
+            <el-table-column label="API Key" width="210">
+              <template #default="{ row }">
+                <template v-if="row.llmMode === 'online'">
+                  <div v-if="row.hasApiKey" class="apikey-inline">
+                    <!-- 默认显示截断的明文（apiKeyMasked前缀），visible=true时展示完整key可滚动 -->
+                    <div class="apikey-scroll-wrap" :class="{ 'is-expanded': getApiKeyState(row.id).visible }">
+                      <code class="apikey-code">{{
+                        getApiKeyState(row.id).visible
+                          ? (getApiKeyState(row.id).value || row.apiKeyMasked || '加载中...')
+                          : (row.apiKeyMasked || '••••••••')
+                      }}</code>
+                    </div>
+                    <el-tooltip :content="getApiKeyState(row.id).visible ? '隐藏完整 Key' : '展开查看完整 Key'" placement="top">
+                      <el-button link size="small" :loading="getApiKeyState(row.id).loading" @click="toggleApiKeyVisible(row)">
+                        <el-icon v-if="getApiKeyState(row.id).visible"><Hide /></el-icon>
+                        <el-icon v-else><View /></el-icon>
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="复制完整 Key" placement="top">
+                      <el-button link size="small" @click="copyApiKey(row)">
+                        <el-icon><CopyDocument /></el-icon>
+                      </el-button>
+                    </el-tooltip>
+                  </div>
                   <el-tag v-else size="small" type="warning" effect="plain">未配置</el-tag>
-                </span>
-              </div>
-              <div class="detail-row" v-if="config.llmMode === 'offline' && config.ollamaUrl">
-                <span class="detail-label">Ollama 地址</span>
-                <span class="detail-value url">{{ config.ollamaUrl }}</span>
-              </div>
-              <div class="detail-row models-row">
-                <span class="detail-label">模型配置</span>
-                <div class="models-tags">
-                  <el-tag v-if="config.chatModel" size="small" effect="plain">对话: {{ config.chatModel }}</el-tag>
-                  <el-tag v-if="config.llmModel" size="small" effect="plain">分析: {{ config.llmModel }}</el-tag>
-                  <el-tag v-if="config.embedModel" size="small" effect="plain">向量: {{ config.embedModel }}</el-tag>
+                </template>
+                <span v-else class="text-muted">-</span>
+              </template>
+            </el-table-column>
+
+            <!-- 操作 -->
+            <el-table-column label="操作" width="160" align="center" fixed="right">
+              <template #default="{ row }">
+                <div class="action-btns" @click.stop>
+                  <el-button v-if="!row.isActive" size="small" type="primary" @click="handleActivate(row)">激活</el-button>
+                  <template v-if="isAdmin">
+                    <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
+                    <el-button size="small" type="danger" plain :disabled="row.isActive" @click="handleDelete(row)">删除</el-button>
+                  </template>
+                  <el-tag v-else size="small" type="info" effect="plain">只读</el-tag>
                 </div>
-              </div>
-              <div class="detail-row" v-if="config.remark">
-                <span class="detail-label">备注</span>
-                <span class="detail-value muted">{{ config.remark }}</span>
-              </div>
-            </div>
-          </el-card>
-        </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
       </div>
 
-      <!-- 无用户配置时提示 -->
-      <div v-if="userConfigs.length === 0 && !loading && systemConfigs.length > 0" class="user-empty-tip">
-        <el-text type="info">
-          <el-icon><InfoFilled /></el-icon>
-          暂无自定义配置，点击「新增配置」添加离线或在线模型配置
-        </el-text>
+      <!-- ===== 自定义配置分组 ===== -->
+      <div class="section-block user-section">
+        <div class="section-header user-section-header">
+          <div class="section-header-left">
+            <div class="section-icon user-icon">
+              <el-icon><User /></el-icon>
+            </div>
+            <div>
+              <div class="section-title">我的自定义配置</div>
+              <div class="section-desc">仅自己可见，可自由编辑和删除</div>
+            </div>
+          </div>
+          <el-tag type="primary" size="small" effect="plain">共 {{ userConfigs.length }} 项</el-tag>
+        </div>
+
+        <el-card shadow="never" class="table-card">
+          <el-empty v-if="userConfigs.length === 0 && !loading" description="暂无自定义配置，点击右上角「新增配置」添加" :image-size="80" />
+          <el-table v-else :data="userConfigs" row-key="id" stripe class="config-table">
+            <!-- 配置名称（含状态指示） -->
+            <el-table-column label="配置名称" min-width="200">
+              <template #default="{ row }">
+                <div class="name-cell">
+                  <el-icon v-if="row.isActive" class="row-active-icon"><CircleCheckFilled /></el-icon>
+                  <span v-else class="row-inactive-dot"></span>
+                  <span class="config-name-text" :class="{ 'is-active-name': row.isActive }">{{ row.configName }}</span>
+                  <el-tag v-if="row.isActive" size="small" type="warning" effect="dark" class="active-tag">启用中</el-tag>
+                </div>
+              </template>
+            </el-table-column>
+
+            <!-- 类型 -->
+            <el-table-column label="类型" width="115" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.llmMode === 'offline' ? 'success' : 'primary'" size="small" effect="plain">
+                  {{ row.llmMode === 'offline' ? 'Ollama 离线' : '在线 API' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+
+            <!-- 地址/URL -->
+            <el-table-column label="接入地址" min-width="180">
+              <template #default="{ row }">
+                <span class="url-text">{{ row.llmMode === 'online' ? row.baseUrl : row.ollamaUrl }}</span>
+              </template>
+            </el-table-column>
+
+            <!-- 模型 -->
+            <el-table-column label="模型配置" min-width="220">
+              <template #default="{ row }">
+                <div class="model-tags-cell">
+                  <el-tag v-if="row.chatModel" size="small" effect="plain" type="primary">对话: {{ row.chatModel }}</el-tag>
+                  <el-tag v-if="row.llmModel" size="small" effect="plain" type="success">分析: {{ row.llmModel }}</el-tag>
+                  <el-tag v-if="row.embedModel" size="small" effect="plain" type="info">向量: {{ row.embedModel }}</el-tag>
+                </div>
+              </template>
+            </el-table-column>
+
+            <!-- API Key -->
+            <el-table-column label="API Key" width="210">
+              <template #default="{ row }">
+                <template v-if="row.llmMode === 'online'">
+                  <div v-if="row.hasApiKey" class="apikey-inline">
+                    <div class="apikey-scroll-wrap" :class="{ 'is-expanded': getApiKeyState(row.id).visible }">
+                      <code class="apikey-code">{{
+                        getApiKeyState(row.id).visible
+                          ? (getApiKeyState(row.id).value || row.apiKeyMasked || '加载中...')
+                          : (row.apiKeyMasked || '••••••••')
+                      }}</code>
+                    </div>
+                    <el-tooltip :content="getApiKeyState(row.id).visible ? '隐藏完整 Key' : '展开查看完整 Key'" placement="top">
+                      <el-button link size="small" :loading="getApiKeyState(row.id).loading" @click="toggleApiKeyVisible(row)">
+                        <el-icon v-if="getApiKeyState(row.id).visible"><Hide /></el-icon>
+                        <el-icon v-else><View /></el-icon>
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="复制完整 Key" placement="top">
+                      <el-button link size="small" @click="copyApiKey(row)">
+                        <el-icon><CopyDocument /></el-icon>
+                      </el-button>
+                    </el-tooltip>
+                  </div>
+                  <el-tag v-else size="small" type="warning" effect="plain">未配置</el-tag>
+                </template>
+                <span v-else class="text-muted">-</span>
+              </template>
+            </el-table-column>
+
+            <!-- 操作 -->
+            <el-table-column label="操作" width="160" align="center" fixed="right">
+              <template #default="{ row }">
+                <div class="action-btns" @click.stop>
+                  <el-button v-if="!row.isActive" size="small" type="primary" @click="handleActivate(row)">激活</el-button>
+                  <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
+                  <el-button size="small" type="danger" plain :disabled="row.isActive" @click="handleDelete(row)">删除</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
       </div>
     </div>
 
@@ -353,7 +397,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CircleCheckFilled, Plus, Refresh,
-  Connection, Setting, User, InfoFilled, View, CopyDocument, Warning
+  Connection, Setting, User, InfoFilled, View, Hide, CopyDocument, Warning
 } from '@element-plus/icons-vue'
 import {
   getSystemStatus, listConfigs, getActiveConfig,
@@ -591,222 +635,391 @@ onMounted(loadData)
 </script>
 
 <style lang="scss" scoped>
-.llm-settings {
-  max-width: 900px;
+// ========== 页面容器：全宽 ==========
+.llm-settings-page {
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
+// ========== 页面标题 ==========
 .page-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
   margin-bottom: var(--space-6);
 
-  .header-title h2 {
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text-primary);
-    margin: 0 0 var(--space-1) 0;
+  .header-title {
+    h2 {
+      font-family: var(--font-heading);
+      font-size: var(--text-2xl);
+      font-weight: var(--font-bold);
+      color: var(--color-text-primary);
+      margin-bottom: var(--space-1);
+    }
+    .subtitle {
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+      margin: 0;
+    }
   }
 
-  .subtitle {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-    margin: 0;
+  .header-actions {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
   }
 }
 
-.system-status {
+// ========== 当前启用 Banner ==========
+.active-banner {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+  background: linear-gradient(135deg, rgba(29, 78, 216, 0.06) 0%, rgba(29, 78, 216, 0.02) 100%);
+  border: 1.5px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  gap: var(--space-4);
 
-  .status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: var(--space-1);
-    background: currentColor;
-    animation: pulse 2s infinite;
+  .active-banner-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    flex: 1;
+    min-width: 0;
 
-    &.offline { background: #67c23a; }
-    &.online { background: #409eff; }
+    .banner-check-icon {
+      font-size: 28px;
+      color: #67c23a;
+      flex-shrink: 0;
+    }
+
+    .banner-info {
+      min-width: 0;
+
+      .banner-title {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+        margin-bottom: var(--space-2);
+
+        .banner-label {
+          font-size: var(--text-sm);
+          color: var(--color-text-muted);
+        }
+
+        .banner-name {
+          font-size: var(--text-base);
+          font-weight: var(--font-bold);
+          color: var(--color-text-primary);
+        }
+      }
+
+      .banner-models {
+        display: flex;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+
+        .banner-model-item {
+          display: flex;
+          align-items: center;
+          gap: var(--space-1);
+
+          .banner-model-label {
+            font-size: var(--text-xs);
+            color: var(--color-text-muted);
+          }
+
+          code {
+            font-size: var(--text-xs);
+            background: rgba(29, 78, 216, 0.08);
+            color: var(--color-accent);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+          }
+        }
+      }
+    }
   }
 
-  .status-model {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    font-family: monospace;
+  .banner-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+
+    .status-pulse {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+
+      &.offline { background: #67c23a; box-shadow: 0 0 0 3px rgba(103, 194, 58, 0.2); }
+      &.online  { background: #409eff; box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.2); }
+    }
+
+    .status-text {
+      font-size: var(--text-sm);
+      color: var(--color-text-secondary);
+      font-weight: var(--font-medium);
+    }
+
+    .status-model {
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+      font-family: monospace;
+    }
   }
 }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 
-.active-config-card {
-  margin-bottom: var(--space-4);
-  border: 1px solid var(--color-accent);
-  background: rgba(29, 78, 216, 0.03);
-
-  .active-config-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
-
-    .active-icon { color: #67c23a; font-size: 18px; }
-    .active-label { color: var(--color-text-muted); font-size: var(--text-sm); }
-  }
-
-  .active-config-models {
-    display: flex;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-
-    .model-item {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-
-      .model-label {
-        font-size: var(--text-xs);
-        color: var(--color-text-muted);
-      }
-    }
-  }
-}
-
-.toolbar {
-  margin-bottom: var(--space-4);
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  align-items: center;
-
-  .toolbar-tip {
-    flex: 1;
-    min-width: 300px;
-  }
-}
-
+// ========== 配置列表容器 ==========
 .config-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-6);
 }
 
-.config-group {
+// ========== 分组区块 ==========
+.section-block {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
 
-  .group-label {
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-1);
+
+  .section-header-left {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--color-text-secondary);
-    padding-bottom: var(--space-1);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--space-3);
+  }
+
+  .section-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .section-title {
+    font-size: var(--text-base);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: 2px;
+  }
+
+  .section-desc {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
   }
 }
 
-.config-card {
-  :deep(.el-card) {
-    transition: all var(--duration-normal) var(--ease-default);
+// 系统预设分组醒目样式
+.system-section-header {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.03) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+
+  .section-icon.system-icon {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+  }
+
+  .section-title {
+    color: #92400e;
+  }
+}
+
+// 自定义配置分组样式
+.user-section-header {
+  background: linear-gradient(135deg, rgba(29, 78, 216, 0.06) 0%, rgba(29, 78, 216, 0.02) 100%);
+  border: 1px solid rgba(29, 78, 216, 0.2);
+
+  .section-icon.user-icon {
+    background: rgba(29, 78, 216, 0.1);
+    color: var(--color-accent);
+  }
+
+  .section-title {
+    color: var(--color-accent);
+  }
+}
+
+// ========== 表格卡片 ==========
+.table-card {
+  :deep(.el-card__body) { padding: 0; }
+}
+
+.config-table {
+  width: 100%;
+
+  :deep(.el-table__row:hover) td {
+    background: var(--color-bg-secondary);
+  }
+}
+
+// ========== 表格单元格样式 ==========
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: nowrap;
+
+  .row-active-icon {
+    color: #67c23a;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .row-inactive-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-border-dark);
+    flex-shrink: 0;
+  }
+
+  .config-name-text {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &.is-active-name {
+      font-weight: var(--font-bold);
+      color: var(--color-accent);
+    }
+  }
+
+  .active-tag {
+    flex-shrink: 0;
+  }
+}
+
+.url-text {
+  font-family: monospace;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+
+.model-tags-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+// API Key 内联样式（深色背景 code 块 + 可滚动展开）
+.apikey-inline {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+
+  // 外层滚动容器
+  .apikey-scroll-wrap {
+    flex: 1;
+    min-width: 0;
+    max-width: 130px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--color-bg-secondary);
     border: 1px solid var(--color-border);
 
-    &.is-active {
-      border-color: var(--color-accent);
+    // 默认：截断不滚动
+    &:not(.is-expanded) {
+      .apikey-code {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
     }
 
-    &:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
-  }
-}
+    // 展开后：可横向滚动查看完整 key
+    &.is-expanded {
+      overflow-x: auto;
+      max-width: 130px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--color-border-dark) transparent;
 
-.config-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--space-3);
+      &::-webkit-scrollbar {
+        height: 3px;
+      }
+      &::-webkit-scrollbar-thumb {
+        background: var(--color-border-dark);
+        border-radius: 2px;
+      }
 
-  .config-name-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-
-    .active-badge { color: #67c23a; font-size: 16px; }
-    .config-name { font-weight: var(--font-semibold); font-size: var(--text-base); }
-  }
-
-  .config-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-
-    .readonly-tag {
-      font-size: var(--text-xs);
+      .apikey-code {
+        white-space: nowrap;
+      }
     }
   }
-}
 
-.config-details {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--color-border);
-}
-
-.detail-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-
-  .detail-label {
-    width: 80px;
-    color: var(--color-text-muted);
-    flex-shrink: 0;
-    font-size: var(--text-xs);
-  }
-
-  .detail-value {
-    color: var(--color-text-primary);
-
-    &.url { font-family: monospace; font-size: var(--text-xs); color: var(--color-text-secondary); }
-    &.muted { color: var(--color-text-muted); }
-  }
-
-  &.models-row { align-items: flex-start; }
-
-  .models-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-}
-
-.apikey-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-
-  .apikey-masked {
+  .apikey-code {
+    display: block;
     font-family: monospace;
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    letter-spacing: 0.05em;
+    font-size: 12px;
+    color: var(--color-text-primary);
+    padding: 2px 6px;
+    letter-spacing: 0.03em;
+    line-height: 1.5;
+    cursor: default;
+    user-select: text;
+  }
+
+  .el-button {
+    flex-shrink: 0;
+    padding: 2px 3px;
+    color: var(--color-text-muted);
+
+    &:hover {
+      color: var(--color-accent);
+    }
   }
 }
 
-.user-empty-tip {
-  padding: var(--space-4);
-  text-align: center;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-md);
+.text-muted {
   color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
+.action-btns {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+
+  // 让删除按钮不换行
+  .el-button {
+    margin: 0 !important;
+    padding: 5px 8px;
+  }
+}
+
+// ========== 对话框 ==========
 .test-result {
   margin-top: var(--space-4);
 }
