@@ -8,16 +8,16 @@
           {{ isAdmin ? '管理员可新增/编辑离线和在线配置，并可修改系统默认配置' : '可新增/编辑自定义离线和在线配置，系统默认配置只读' }}
         </p>
       </div>
-      <div class="system-status" v-if="systemStatus">
+      <div class="system-status" v-if="activeConfig">
         <el-tag
-          :type="systemStatus.currentMode === 'offline' ? 'success' : 'primary'"
+          :type="activeConfig.llmMode === 'offline' ? 'success' : 'primary'"
           size="large"
           effect="light"
         >
-          <span class="status-dot" :class="systemStatus.currentMode"></span>
-          {{ systemStatus.currentMode === 'offline' ? '离线模式' : '在线模式' }}
+          <span class="status-dot" :class="activeConfig.llmMode"></span>
+          {{ activeConfig.llmMode === 'offline' ? '离线模式' : '在线模式' }}
         </el-tag>
-        <span class="status-model">{{ systemStatus.chatModel }}</span>
+        <span class="status-model">{{ activeConfig.chatModel }}</span>
       </div>
     </div>
 
@@ -105,8 +105,16 @@
               </div>
               <div class="detail-row" v-if="config.llmMode === 'online'">
                 <span class="detail-label">API Key</span>
-                <span class="detail-value">
-                  <el-tag v-if="config.hasApiKey" size="small" type="success" effect="plain">已配置</el-tag>
+                <span class="detail-value apikey-row">
+                  <template v-if="config.hasApiKey">
+                    <span class="apikey-masked">{{ getApiKeyState(config.id).visible ? getApiKeyState(config.id).value : (config.apiKeyMasked || '••••••••') }}</span>
+                    <el-button link size="small" :loading="getApiKeyState(config.id).loading" @click="toggleApiKeyVisible(config)">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                    <el-button link size="small" @click="copyApiKey(config)">
+                      <el-icon><CopyDocument /></el-icon>
+                    </el-button>
+                  </template>
                   <el-tag v-else size="small" type="warning" effect="plain">未配置（需管理员设置）</el-tag>
                 </span>
               </div>
@@ -171,8 +179,16 @@
               </div>
               <div class="detail-row" v-if="config.llmMode === 'online'">
                 <span class="detail-label">API Key</span>
-                <span class="detail-value">
-                  <el-tag v-if="config.hasApiKey" size="small" type="success" effect="plain">已配置</el-tag>
+                <span class="detail-value apikey-row">
+                  <template v-if="config.hasApiKey">
+                    <span class="apikey-masked">{{ getApiKeyState(config.id).visible ? getApiKeyState(config.id).value : (config.apiKeyMasked || '••••••••') }}</span>
+                    <el-button link size="small" :loading="getApiKeyState(config.id).loading" @click="toggleApiKeyVisible(config)">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                    <el-button link size="small" @click="copyApiKey(config)">
+                      <el-icon><CopyDocument /></el-icon>
+                    </el-button>
+                  </template>
                   <el-tag v-else size="small" type="warning" effect="plain">未配置</el-tag>
                 </span>
               </div>
@@ -267,8 +283,20 @@
             <el-input v-model="form.baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" />
           </el-form-item>
           <el-form-item label="API Key">
-            <el-input v-model="form.apiKey" type="password" show-password
-              :placeholder="editingConfig ? '留空则保留原有 Key' : '请输入 API Key'" />
+            <el-input
+              v-model="form.apiKey"
+              type="password"
+              show-password
+              :placeholder="editingConfig && editingConfig.hasApiKey ? '已配置（留空保留原有 Key，输入新值则覆盖）' : '请输入 API Key'"
+            >
+              <template v-if="editingConfig && editingConfig.hasApiKey && !form.apiKey" #prefix>
+                <span style="font-size:12px;color:var(--el-text-color-placeholder);letter-spacing:3px;line-height:1">••••••••</span>
+              </template>
+            </el-input>
+            <div v-if="editingConfig && editingConfig.hasApiKey" style="font-size:12px;color:var(--el-color-warning);margin-top:4px;">
+              <el-icon style="vertical-align:-2px"><Warning /></el-icon>
+              当前已有 API Key，留空则保留，输入新值则覆盖原有 Key
+            </div>
           </el-form-item>
           <el-form-item label="对话模型" prop="chatModel">
             <el-select v-model="form.chatModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
@@ -325,12 +353,12 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CircleCheckFilled, Plus, Refresh,
-  Connection, Setting, User, InfoFilled
+  Connection, Setting, User, InfoFilled, View, CopyDocument, Warning
 } from '@element-plus/icons-vue'
 import {
   getSystemStatus, listConfigs, getActiveConfig,
   saveConfig, activateConfig, deleteConfig, testConnection,
-  saveSystemConfig, deleteSystemConfig
+  saveSystemConfig, deleteSystemConfig, getPlainApiKey
 } from '@/api/llmConfig'
 import { useUserStore } from '@/stores/user'
 
@@ -349,6 +377,55 @@ const formRef = ref(null)
 const systemStatus = ref(null)
 const activeConfig = ref(null)
 const configs = ref([])
+
+// 查看明文 API Key 状态：{ [configId]: { visible: bool, value: string, loading: bool } }
+const apiKeyState = reactive({})
+
+const getApiKeyState = (configId) => {
+  if (!apiKeyState[configId]) {
+    apiKeyState[configId] = { visible: false, value: '', loading: false }
+  }
+  return apiKeyState[configId]
+}
+
+const toggleApiKeyVisible = async (config) => {
+  const state = getApiKeyState(config.id)
+  if (state.visible) {
+    state.visible = false
+    return
+  }
+  if (state.value) {
+    state.visible = true
+    return
+  }
+  state.loading = true
+  try {
+    const res = await getPlainApiKey(config.id)
+    state.value = res.data || ''
+    state.visible = true
+  } catch (e) {
+    ElMessage.error('获取 API Key 失败: ' + (e.message || '未知错误'))
+  } finally {
+    state.loading = false
+  }
+}
+
+const copyApiKey = async (config) => {
+  const state = getApiKeyState(config.id)
+  let key = state.value
+  if (!key) {
+    try {
+      const res = await getPlainApiKey(config.id)
+      key = res.data || ''
+      state.value = key
+    } catch (e) {
+      ElMessage.error('获取 API Key 失败')
+      return
+    }
+  }
+  await navigator.clipboard.writeText(key)
+  ElMessage.success('API Key 已复制到剪贴板')
+}
 
 // ==================== 计算属性 ====================
 const systemConfigs = computed(() => configs.value.filter(c => c.isSystemConfig))
@@ -707,6 +784,19 @@ onMounted(loadData)
   &.models-row { align-items: flex-start; }
 
   .models-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+}
+
+.apikey-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+
+  .apikey-masked {
+    font-family: monospace;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    letter-spacing: 0.05em;
+  }
 }
 
 .user-empty-tip {

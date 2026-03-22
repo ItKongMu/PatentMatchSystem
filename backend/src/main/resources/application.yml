@@ -151,6 +151,9 @@ minio:
 
 # ── 专利系统核心配置 ───────────────────────────────────────────────────────
 patent:
+  # API Key 加密密钥（AES-256，32字节，生产环境必须通过环境变量覆盖）
+  api-key-secret: ${API_KEY_SECRET:PatentSys@AES256Key!ChangeMe!!}
+
   # LLM模式: online-在线API / offline-Ollama本地
   # 默认 offline，无网环境安全启动；online 模式需设置 ONLINE_API_KEY 环境变量
   llm-mode: ${LLM_MODE:offline}

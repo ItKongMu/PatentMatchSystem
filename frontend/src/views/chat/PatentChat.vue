@@ -177,6 +177,22 @@
                   </div>
                 </div>
                 
+                <!-- 图谱可视化 -->
+                <div v-if="msg.graphData" class="graph-embed">
+                  <div class="graph-embed-header">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/>
+                    </svg>
+                    知识图谱：{{ msg.graphData.queryValue }}
+                    <span class="graph-stats">{{ msg.graphData.nodes?.length || 0 }} 个节点 · {{ msg.graphData.links?.length || 0 }} 条关系</span>
+                    <a class="graph-link" @click="openFullGraph(msg.graphData)">查看完整图谱 →</a>
+                  </div>
+                  <div
+                    :ref="el => registerGraphRef(el, index)"
+                    class="graph-embed-canvas"
+                  ></div>
+                </div>
+
                 <!-- 后续建议 -->
                 <div v-if="msg.suggestions?.length && index === messages.length - 1" class="follow-suggestions">
                   <span class="suggestion-label">您可以继续问：</span>
@@ -261,6 +277,12 @@ import { chatApi } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 import { storeToRefs } from 'pinia'
 import ChatSessionSidebar from '@/components/chat/ChatSessionSidebar.vue'
+import * as echarts from 'echarts/core'
+import { GraphChart } from 'echarts/charts'
+import { TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const router = useRouter()
 const chatStore = useChatStore()
@@ -280,6 +302,116 @@ const messageListRef = ref(null)
 const currentAbortController = ref(null)  // 用于取消流式请求
 const isInitialized = ref(false)
 const showSidebar = ref(true)  // 侧边栏显示状态
+
+// ==================== 图谱相关 ====================
+// 存储各消息索引对应的图谱 DOM 元素 ref 和 ECharts 实例
+const graphRefs = {}       // index -> DOM element
+const graphInstances = {}  // index -> ECharts instance
+
+const NODE_COLORS = {
+  Patent: '#3B82F6',
+  Entity: '#10B981',
+  IPC: '#F59E0B',
+  Applicant: '#8B5CF6',
+  Concept: '#EC4899'
+}
+
+const getNodeColor = (label) => NODE_COLORS[label] || '#94A3B8'
+const getNodeSize = (label) => {
+  const sizeMap = { Patent: 24, IPC: 18, Applicant: 16, Concept: 14, Entity: 13 }
+  return sizeMap[label] || 12
+}
+
+/**
+ * 注册图谱容器 DOM ref（通过 :ref 动态绑定）
+ */
+const registerGraphRef = (el, index) => {
+  if (el) {
+    graphRefs[index] = el
+    // 若此时已有图谱数据，立即渲染
+    const msg = messages.value[index]
+    if (msg?.graphData && !graphInstances[index]) {
+      nextTick(() => renderGraphAt(index, msg.graphData))
+    }
+  }
+}
+
+/**
+ * 在指定消息索引处渲染图谱
+ */
+const renderGraphAt = (index, graphData) => {
+  const container = graphRefs[index]
+  if (!container || !graphData) return
+
+  // 销毁旧实例（如果存在）
+  if (graphInstances[index]) {
+    graphInstances[index].dispose()
+  }
+
+  const chart = echarts.init(container)
+  graphInstances[index] = chart
+
+  const nodes = (graphData.nodes || []).map(node => ({
+    id: node.id,
+    name: node.name,
+    nodeType: node.label,
+    symbolSize: getNodeSize(node.label),
+    itemStyle: { color: getNodeColor(node.label) },
+    label: {
+      show: true,
+      position: 'right',
+      fontSize: 10,
+      color: '#374151',
+      formatter: (p) => {
+        const n = p.data.name || ''
+        return n.length > 10 ? n.substring(0, 10) + '…' : n
+      }
+    }
+  }))
+
+  const links = (graphData.links || []).map(link => ({
+    source: link.source,
+    target: link.target,
+    label: { show: true, formatter: link.type || '', fontSize: 9, color: '#9CA3AF' },
+    lineStyle: { color: '#CBD5E1', width: 1.2, curveness: 0.1 }
+  }))
+
+  chart.setOption({
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        if (params.dataType === 'node') {
+          return `<strong>${params.data.name}</strong><br/><span style="color:#9CA3AF">${params.data.nodeType || ''}</span>`
+        }
+        if (params.dataType === 'edge') {
+          const t = typeof params.data.label === 'object' ? params.data.label.formatter : params.data.label
+          return t ? `<span style="color:#9CA3AF">${t}</span>` : ''
+        }
+        return ''
+      }
+    },
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      roam: true,
+      draggable: true,
+      data: nodes,
+      links,
+      force: { repulsion: 150, edgeLength: [60, 150], gravity: 0.1, layoutAnimation: true },
+      emphasis: { focus: 'adjacency' }
+    }]
+  })
+}
+
+/**
+ * 点击"查看完整图谱"：跳转到知识图谱页面（可扩展为带参数跳转）
+ */
+const openFullGraph = (graphData) => {
+  router.push({
+    path: '/graph',
+    query: { type: graphData.queryType, value: graphData.queryValue }
+  })
+}
 
 // 切换侧边栏显示
 const toggleSidebar = () => {
@@ -326,6 +458,18 @@ const handleSend = async () => {
         onPatents: (patents) => {
           chatStore.updateAssistantPatents(patents)
           scrollToBottom()
+        },
+        // 收到图谱数据
+        onGraph: (graphData) => {
+          chatStore.updateAssistantGraph(graphData)
+          // 等待 DOM 渲染后初始化图谱
+          nextTick(() => {
+            const idx = chatStore.streamingMessageIndex
+            if (idx >= 0) {
+              renderGraphAt(idx, graphData)
+            }
+            scrollToBottom()
+          })
         },
         // 流式完成
         onDone: (data) => {
@@ -451,9 +595,12 @@ onDeactivated(() => {
   chatStore.saveToStorage()
 })
 
-// 组件卸载时取消流式请求
+// 组件卸载时取消流式请求，并销毁所有图谱实例
 onUnmounted(() => {
   cancelStream()
+  Object.values(graphInstances).forEach(inst => {
+    try { inst.dispose() } catch (e) { /* ignore */ }
+  })
 })
 </script>
 
@@ -951,6 +1098,57 @@ onUnmounted(() => {
     opacity: 1;
     transform: scale(1.2);
   }
+}
+
+// 图谱嵌入组件
+.graph-embed {
+  margin-top: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-primary);
+}
+
+.graph-embed-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+
+  svg {
+    color: var(--color-accent);
+    flex-shrink: 0;
+  }
+
+  .graph-stats {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    font-weight: var(--font-normal);
+  }
+
+  .graph-link {
+    font-size: 10px;
+    color: var(--color-accent);
+    cursor: pointer;
+    margin-left: var(--space-2);
+    white-space: nowrap;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.graph-embed-canvas {
+  width: 100%;
+  height: 260px;
 }
 
 // 输入区域

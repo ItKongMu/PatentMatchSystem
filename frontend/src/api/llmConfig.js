@@ -87,3 +87,11 @@ export const saveSystemConfig = (data) => {
 export const deleteSystemConfig = (configId) => {
   return request.delete(`/llm-config/system/${configId}`)
 }
+
+/**
+ * 获取指定配置的明文 API Key（仅本人或管理员）
+ * @param {number} configId - 配置ID
+ */
+export const getPlainApiKey = (configId) => {
+  return request.get(`/llm-config/${configId}/apikey`)
+}

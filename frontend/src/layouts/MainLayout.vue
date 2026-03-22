@@ -114,15 +114,6 @@
             <template #title>专利检索</template>
           </el-menu-item>
           
-          <el-menu-item index="/chat">
-            <el-icon>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-            </el-icon>
-            <template #title>智能对话</template>
-          </el-menu-item>
-          
           <el-menu-item index="/analysis">
             <el-icon>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -145,6 +136,15 @@
               </svg>
             </el-icon>
             <template #title>知识图谱</template>
+          </el-menu-item>
+
+          <el-menu-item index="/chat">
+            <el-icon>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+            </el-icon>
+            <template #title>智能对话</template>
           </el-menu-item>
         </div>
 

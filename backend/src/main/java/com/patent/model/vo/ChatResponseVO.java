@@ -34,6 +34,9 @@ public class ChatResponseVO {
     @Schema(description = "执行的工具调用信息")
     private List<ToolCallInfo> toolCalls;
 
+    @Schema(description = "图谱数据（getPatentGraph 工具调用时返回）")
+    private GraphData graphData;
+
     @Schema(description = "响应时间")
     private LocalDateTime timestamp;
 
@@ -88,5 +91,27 @@ public class ChatResponseVO {
 
         @Schema(description = "执行结果摘要")
         private String resultSummary;
+    }
+
+    /**
+     * 图谱数据（供前端 ECharts 直接渲染）
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Schema(description = "图谱数据")
+    public static class GraphData {
+        @Schema(description = "查询类型：patent/entity/ipc")
+        private String queryType;
+
+        @Schema(description = "查询值")
+        private String queryValue;
+
+        @Schema(description = "节点列表")
+        private java.util.List<GraphVO.NodeVO> nodes;
+
+        @Schema(description = "关系列表")
+        private java.util.List<GraphVO.LinkVO> links;
     }
 }

@@ -29,7 +29,7 @@ export const chatApi = {
    * @param {Function} onComplete - 完成回调
    * @returns {AbortController} - 用于取消请求
    */
-  sendStream(data, { onSession, onContent, onTools, onPatents, onDone, onError }) {
+  sendStream(data, { onSession, onContent, onTools, onPatents, onGraph, onDone, onError }) {
     const abortController = new AbortController()
     
     // 检查是否有 token
@@ -144,6 +144,13 @@ export const chatApi = {
                   const parsed = JSON.parse(data)
                   console.log('[SSE] 专利结果:', parsed?.length)
                   onPatents(parsed)
+                }
+                break
+              case 'graph':
+                if (onGraph) {
+                  const parsed = JSON.parse(data)
+                  console.log('[SSE] 图谱数据:', parsed?.queryType, parsed?.nodes?.length, '节点')
+                  onGraph(parsed)
                 }
                 break
               case 'done':

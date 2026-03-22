@@ -114,6 +114,17 @@ public class LlmConfigController {
     }
 
     /**
+     * 获取指定配置的明文 API Key（仅本人或管理员可调用）
+     */
+    @GetMapping("/{configId}/apikey")
+    @Operation(summary = "查看明文API Key", description = "仅配置所有者或管理员可调用，返回解密后的 API Key")
+    public Result<String> getPlainApiKey(@PathVariable Long configId) {
+        Long userId = StpUtil.getLoginIdAsLong();
+        boolean isAdmin = isCurrentUserAdmin(userId);
+        return Result.success(llmConfigService.getPlainApiKey(userId, isAdmin, configId));
+    }
+
+    /**
      * 测试 LLM 连接
      * 根据传入配置动态构建客户端并发送测试消息，不影响已保存配置
      */

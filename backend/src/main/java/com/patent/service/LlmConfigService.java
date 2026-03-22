@@ -66,4 +66,9 @@ public interface LlmConfigService {
      * （供前端展示当前模式状态）
      */
     Map<String, Object> getSystemStatus();
+
+    /**
+     * 获取指定配置的明文 API Key（仅本人或管理员可调用）
+     */
+    String getPlainApiKey(Long requestUserId, boolean isAdmin, Long configId);
 }

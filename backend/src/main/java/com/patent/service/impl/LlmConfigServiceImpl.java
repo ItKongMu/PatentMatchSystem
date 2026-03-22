@@ -1,6 +1,7 @@
 package com.patent.service.impl;
 
 import com.patent.common.exception.BusinessException;
+import com.patent.common.util.AesUtil;
 import com.patent.config.PatentConfig;
 import com.patent.mapper.LlmConfigMapper;
 import com.patent.model.dto.LlmConfigDTO;
@@ -36,28 +37,35 @@ public class LlmConfigServiceImpl implements LlmConfigService {
 
     private final LlmConfigMapper llmConfigMapper;
     private final PatentConfig patentConfig;
+    private final AesUtil aesUtil;
 
     // API Key 脱敏：只保留前4位和后4位
     private static final int KEY_MASK_KEEP = 4;
 
     @Override
     public List<LlmConfigVO> listConfigs(Long userId) {
-        // 合并返回：系统默认配置（user_id=0）+ 用户自定义配置
-        // 系统配置排前面，用户配置排后面
         List<SysLlmConfig> configs = llmConfigMapper.findAllWithSystem(userId);
+        // 查出该用户当前选择的配置ID，用于标记 isActive
+        Long selectedConfigId = llmConfigMapper.findSelectedConfigId(userId);
+        // 若用户无选择记录，回退到系统默认激活配置
+        if (selectedConfigId == null) {
+            SysLlmConfig systemDefault = llmConfigMapper.findSystemDefault();
+            if (systemDefault != null) selectedConfigId = systemDefault.getId();
+        }
+        final Long activeId = selectedConfigId;
         return configs.stream()
-                .map(this::toVO)
+                .map(c -> toVO(c, activeId))
                 .collect(Collectors.toList());
     }
 
     @Override
     public LlmConfigVO getActiveConfig(Long userId) {
-        SysLlmConfig config = llmConfigMapper.findActiveByUserId(userId);
+        // 优先查用户自己的选择，无选择则回退系统默认
+        SysLlmConfig config = llmConfigMapper.findSelectedByUserId(userId);
         if (config == null) {
-            // 回退到系统默认配置
-            config = llmConfigMapper.findActiveByUserId(0L);
+            config = llmConfigMapper.findSystemDefault();
         }
-        return config != null ? toVO(config) : null;
+        return config != null ? toVO(config, config.getId()) : null;
     }
 
     @Override
@@ -105,9 +113,9 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         config.setRemark(dto.getRemark());
         config.setUpdatedAt(LocalDateTime.now());
 
-        // API Key：空字符串表示清空，null 表示不修改
+        // API Key：空字符串表示清空，null 表示不修改；非空则加密存储
         if (dto.getApiKey() != null) {
-            config.setApiKey(dto.getApiKey().isBlank() ? null : dto.getApiKey());
+            config.setApiKey(dto.getApiKey().isBlank() ? null : aesUtil.encrypt(dto.getApiKey()));
         }
 
         if (dto.getId() != null) {
@@ -117,7 +125,9 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         }
 
         log.info("保存 LLM 配置成功: userId={}, configId={}, configName={}", userId, config.getId(), config.getConfigName());
-        return toVO(config);
+        // 查询当前用户的激活配置ID，用于正确标记 isActive
+        Long selectedConfigId = llmConfigMapper.findSelectedConfigId(userId);
+        return toVO(config, selectedConfigId);
     }
 
     @Override
@@ -127,24 +137,20 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         if (config == null || config.getDeleted() == 1) {
             throw new BusinessException("配置不存在");
         }
-        // 系统配置：所有用户均可激活（选择使用哪个系统预设），管理员激活会影响全局默认
-        // 用户自定义配置：只能激活自己的
         boolean isSystemConfig = config.getUserId() == 0L;
-        if (isSystemConfig) {
-            // 先取消所有系统配置的激活状态
-            llmConfigMapper.deactivateAllByUserId(0L);
-        } else {
-            if (!isAdmin && !config.getUserId().equals(userId)) {
-                throw new BusinessException("无权激活此配置");
-            }
-            // 取消当前用户所有激活状态
-            llmConfigMapper.deactivateAllByUserId(config.getUserId());
+        if (!isSystemConfig && !isAdmin && !config.getUserId().equals(userId)) {
+            throw new BusinessException("无权激活此配置");
         }
 
-        // 再激活目标配置
-        config.setIsActive(1);
-        config.setUpdatedAt(LocalDateTime.now());
-        llmConfigMapper.updateById(config);
+        if (isAdmin && isSystemConfig) {
+            // 管理员激活系统配置：更新系统全局默认（is_active），同时记录管理员自己的选择
+            llmConfigMapper.deactivateAllSystemConfigs();
+            config.setIsActive(1);
+            config.setUpdatedAt(LocalDateTime.now());
+            llmConfigMapper.updateById(config);
+        }
+        // 所有用户（包括管理员）都记录自己的个人选择到 user_llm_selection
+        llmConfigMapper.upsertUserSelection(userId, configId);
 
         log.info("激活 LLM 配置: userId={}, configId={}, configName={}", userId, configId, config.getConfigName());
     }
@@ -164,7 +170,9 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         if (!isAdmin && !config.getUserId().equals(userId)) {
             throw new BusinessException("无权删除此配置");
         }
-        if (config.getIsActive() == 1) {
+        // 检查是否为当前用户的激活配置（通过 user_llm_selection 表）
+        Long selectedConfigId = llmConfigMapper.findSelectedConfigId(userId);
+        if (configId.equals(selectedConfigId)) {
             throw new BusinessException("当前启用的配置不能删除，请先切换到其他配置");
         }
 
@@ -217,6 +225,7 @@ public class LlmConfigServiceImpl implements LlmConfigService {
                 String baseUrl = StringUtils.hasText(dto.getBaseUrl())
                         ? dto.getBaseUrl()
                         : patentConfig.getOnline().getBaseUrl();
+                // 测试连接时 apiKey 来自前端明文输入，无需解密
                 String apiKey = StringUtils.hasText(dto.getApiKey())
                         ? dto.getApiKey()
                         : patentConfig.getOnline().getApiKey();
@@ -290,12 +299,31 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         return status;
     }
 
+    // ==================== 公共方法（供 Controller 调用） ====================
+
+    @Override
+    public String getPlainApiKey(Long requestUserId, boolean isAdmin, Long configId) {
+        SysLlmConfig config = llmConfigMapper.selectById(configId);
+        if (config == null || config.getDeleted() == 1) {
+            throw new BusinessException("配置不存在");
+        }
+        // 系统配置仅管理员可查看明文；用户配置仅本人可查看
+        boolean isSystemConfig = config.getUserId() == 0L;
+        if (isSystemConfig && !isAdmin) {
+            throw new BusinessException("无权查看系统配置的 API Key");
+        }
+        if (!isSystemConfig && !isAdmin && !config.getUserId().equals(requestUserId)) {
+            throw new BusinessException("无权查看此配置的 API Key");
+        }
+        return aesUtil.decrypt(config.getApiKey());
+    }
+
     // ==================== 私有方法 ====================
 
     /**
-     * 将实体转换为 VO（API Key 脱敏）
+     * 将实体转换为 VO，isActive 由调用方传入当前用户选择的 configId 决定
      */
-    private LlmConfigVO toVO(SysLlmConfig config) {
+    private LlmConfigVO toVO(SysLlmConfig config, Long activeConfigId) {
         return LlmConfigVO.builder()
                 .id(config.getId())
                 .userId(config.getUserId())
@@ -308,7 +336,7 @@ public class LlmConfigServiceImpl implements LlmConfigService {
                 .llmModel(config.getLlmModel())
                 .embedModel(config.getEmbedModel())
                 .ollamaUrl(config.getOllamaUrl())
-                .isActive(config.getIsActive() == 1)
+                .isActive(activeConfigId != null && activeConfigId.equals(config.getId()))
                 .isSystemConfig(config.getUserId() == 0L)
                 .remark(config.getRemark())
                 .createdAt(config.getCreatedAt())

@@ -131,6 +131,7 @@ export const useChatStore = defineStore('chat', () => {
       patents: [],
       toolCalls: [],
       suggestions: [],
+      graphData: null,
       timestamp: new Date().toISOString(),
       streaming: true
     })
@@ -162,6 +163,15 @@ export const useChatStore = defineStore('chat', () => {
   function updateAssistantPatents(patents) {
     if (streamingMessageIndex.value >= 0 && messages.value[streamingMessageIndex.value]) {
       messages.value[streamingMessageIndex.value].patents = patents
+    }
+  }
+
+  /**
+   * 更新助手消息的图谱数据
+   */
+  function updateAssistantGraph(graphData) {
+    if (streamingMessageIndex.value >= 0 && messages.value[streamingMessageIndex.value]) {
+      messages.value[streamingMessageIndex.value].graphData = graphData
     }
   }
   
@@ -508,6 +518,7 @@ export const useChatStore = defineStore('chat', () => {
     appendAssistantContent,
     updateAssistantTools,
     updateAssistantPatents,
+    updateAssistantGraph,
     finishAssistantMessage,
     setAssistantError,
     setLoading,
