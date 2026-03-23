@@ -7,17 +7,54 @@
 
       <!-- 对话主体区域 -->
       <div class="chat-container card">
+
+      <!-- 助手信息头部 -->
+      <div class="chat-header">
+        <div class="assistant-identity">
+          <div class="assistant-avatar">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7H3a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+              <path d="M3 14v3a1 1 0 0 0 1 1h1v2a1 1 0 0 0 2 0v-2h10v2a1 1 0 0 0 2 0v-2h1a1 1 0 0 0 1-1v-3"/>
+              <circle cx="9" cy="11" r="1" fill="currentColor"/>
+              <circle cx="15" cy="11" r="1" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="assistant-info">
+            <div class="assistant-name-row">
+              <span class="assistant-name">PatentMind</span>
+              <span class="assistant-badge">专利智能顾问</span>
+              <span class="assistant-status" :class="{ 'thinking': loading }">
+                <span class="status-dot"></span>
+                {{ loading ? '思考中...' : '在线' }}
+              </span>
+            </div>
+            <p class="assistant-desc">专注于专利检索 · 技术匹配 · 知识图谱分析 · 领域洞察</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <el-button size="small" plain @click="handleNewSession" :disabled="loading">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            新建对话
+          </el-button>
+        </div>
+      </div>
+
       <!-- 对话消息列表 -->
       <div ref="messageListRef" class="message-list">
         <!-- 欢迎消息 -->
         <div v-if="messages.length === 0" class="welcome-section">
           <div class="welcome-icon">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7H3a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+              <path d="M3 14v3a1 1 0 0 0 1 1h1v2a1 1 0 0 0 2 0v-2h10v2a1 1 0 0 0 2 0v-2h1a1 1 0 0 0 1-1v-3"/>
+              <circle cx="9" cy="11" r="1" fill="currentColor"/>
+              <circle cx="15" cy="11" r="1" fill="currentColor"/>
             </svg>
           </div>
-          <h2>你好！我是专利检索助手</h2>
-          <p>我可以帮你搜索专利、进行技术匹配分析、查看领域统计等。试试下面的问题开始对话吧！</p>
+          <h2>你好！我是 PatentMind</h2>
+          <p>我是您的专利智能顾问，可帮您检索专利、分析技术匹配度、探索知识图谱关联，以及洞察领域发展趋势。</p>
           
           <!-- 建议问题 -->
           <div class="suggestion-list">
@@ -44,21 +81,24 @@
           class="message-item"
           :class="msg.role"
         >
-          <div class="message-avatar">
-            <svg v-if="msg.role === 'user'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <div class="message-avatar" :class="msg.role">
+            <!-- 用户头像 -->
+            <svg v-if="msg.role === 'user'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
               <circle cx="12" cy="7" r="4"/>
             </svg>
-            <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            <!-- AI头像：与头部栏保持一致的机器人图标 -->
+            <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7H3a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+              <path d="M3 14v3a1 1 0 0 0 1 1h1v2a1 1 0 0 0 2 0v-2h10v2a1 1 0 0 0 2 0v-2h1a1 1 0 0 0 1-1v-3"/>
+              <circle cx="9" cy="11" r="1" fill="currentColor"/>
+              <circle cx="15" cy="11" r="1" fill="currentColor"/>
             </svg>
           </div>
           
           <div class="message-content">
             <div class="message-header">
-              <span class="message-sender">{{ msg.role === 'user' ? '我' : 'AI助手' }}</span>
+              <span class="message-sender">{{ msg.role === 'user' ? '我' : 'PatentMind' }}</span>
               <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
             </div>
             
@@ -182,16 +222,17 @@
 
         <!-- 流式输出时的光标闪烁指示器（显示在消息末尾） -->
         <div v-if="loading && streamingMessageIndex >= 0 && messages[streamingMessageIndex]?.content === ''" class="message-item assistant loading">
-          <div class="message-avatar">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
+          <div class="message-avatar assistant">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7H3a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+              <path d="M3 14v3a1 1 0 0 0 1 1h1v2a1 1 0 0 0 2 0v-2h10v2a1 1 0 0 0 2 0v-2h1a1 1 0 0 0 1-1v-3"/>
+              <circle cx="9" cy="11" r="1" fill="currentColor"/>
+              <circle cx="15" cy="11" r="1" fill="currentColor"/>
             </svg>
           </div>
           <div class="message-content">
             <div class="message-header">
-              <span class="message-sender">AI助手</span>
+              <span class="message-sender">PatentMind</span>
             </div>
             <div class="message-body">
               <div class="typing-indicator">
@@ -536,8 +577,22 @@ const initializeChat = async () => {
   }
 }
 
+// 获取 layout-content 元素并动态控制滚动（直接操作 style，不依赖 scoped class）
+const getLayoutContent = () => document.querySelector('.layout-content')
+
+const disableParentScroll = () => {
+  const el = getLayoutContent()
+  if (el) el.style.overflow = 'hidden'
+}
+
+const enableParentScroll = () => {
+  const el = getLayoutContent()
+  if (el) el.style.overflow = ''
+}
+
 onMounted(() => {
   initializeChat()
+  disableParentScroll()
 })
 
 // keep-alive 激活时恢复状态
@@ -548,6 +603,7 @@ onActivated(() => {
   }
   // 滚动到底部
   scrollToBottom()
+  disableParentScroll()
 })
 
 // keep-alive 停用时保存状态
@@ -556,11 +612,13 @@ onDeactivated(() => {
   cancelStream()
   // 保存当前状态
   chatStore.saveToStorage()
+  enableParentScroll()
 })
 
 // 组件卸载时取消流式请求，并销毁所有图谱实例
 onUnmounted(() => {
   cancelStream()
+  enableParentScroll()
   Object.values(graphInstances).forEach(inst => {
     try { inst.dispose() } catch (e) { /* ignore */ }
   })
@@ -569,14 +627,15 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .patent-chat-page {
-  // 精确高度：视口 - 顶部导航(64px) - 底部(48px) - layout-content上下padding(48px)
-  // 同时覆盖 .page-container 的 padding，让聊天区域完全撑满内容区
-  margin: calc(-1 * var(--space-6));
-  padding: var(--space-6);
-  height: calc(100vh - 64px - 48px - 48px);
+  // 用负 margin 完全抵消 layout-content 四周 24px padding，撑满内容区
+  margin: -24px;
+  // layout-content 已是 overflow:hidden + flex:1，高度自动 = 100vh - header - footer
+  // 子元素用 100% 继承父高度（比固定 calc 更可靠）
+  height: calc(100% + 48px); // 补偿上下各 24px 的 margin
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 // 聊天主体区域布局 - 填满剩余高度
@@ -604,6 +663,118 @@ onUnmounted(() => {
   height: 100%;
   padding: 0;
   overflow: hidden;
+}
+
+// 助手信息头部
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  flex-shrink: 0;
+}
+
+.assistant-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.assistant-avatar {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6366F1 0%, #3B82F6 100%);
+  border-radius: 12px;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.assistant-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.assistant-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.assistant-name {
+  font-family: var(--font-heading);
+  font-size: var(--text-base);
+  font-weight: var(--font-bold);
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+.assistant-badge {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: #6366F1;
+  background: rgba(99, 102, 241, 0.1);
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.assistant-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-success);
+    flex-shrink: 0;
+  }
+
+  &.thinking {
+    color: #F59E0B;
+
+    .status-dot {
+      background: #F59E0B;
+      animation: pulse-dot 1s ease-in-out infinite;
+    }
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.assistant-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+
+  .el-button {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+  }
 }
 
 // 消息列表
@@ -731,8 +902,10 @@ onUnmounted(() => {
 
   &.assistant {
     .message-avatar {
-      background: var(--color-bg-tertiary);
-      color: var(--color-text-secondary);
+      background: linear-gradient(135deg, #6366F1 0%, #3B82F6 100%);
+      color: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(99, 102, 241, 0.25);
     }
 
     .message-body {
@@ -1144,29 +1317,32 @@ onUnmounted(() => {
 // 响应式
 @media (max-width: 768px) {
   .patent-chat-page {
-    height: auto;
-    min-height: calc(100vh - 64px - 48px - 32px);
+    // 移动端同样撑满去掉 header+footer 的剩余高度，负 margin 已抵消 padding
+    height: calc(100vh - 64px - 48px);
+    overflow: hidden;
   }
 
   .chat-main-area {
     flex-direction: column;
-    flex: none;
-    height: auto;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
   }
 
   .session-sidebar-wrapper {
     width: 100% !important;
-    max-height: 200px;
-    margin-bottom: var(--space-4);
+    max-height: 160px;
+    flex-shrink: 0;
   }
 
   .chat-container {
-    height: calc(100vh - 400px);
-    min-height: 300px;
+    flex: 1;
+    min-height: 0;
+    height: auto;
   }
 
   .message-content {
-    max-width: 85%;
+    max-width: 88%;
   }
 
   .suggestion-btn {

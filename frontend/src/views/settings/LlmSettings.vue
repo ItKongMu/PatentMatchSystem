@@ -83,14 +83,19 @@
                 <div class="name-cell">
                   <el-icon v-if="row.isActive" class="row-active-icon"><CircleCheckFilled /></el-icon>
                   <span v-else class="row-inactive-dot"></span>
-                  <span class="config-name-text" :class="{ 'is-active-name': row.isActive }">{{ row.configName }}</span>
-                  <el-tag v-if="row.isActive" size="small" type="warning" effect="dark" class="active-tag">启用中</el-tag>
+                  <div class="name-cell-content">
+                    <div class="name-cell-top">
+                      <span class="config-name-text" :class="{ 'is-active-name': row.isActive }">{{ row.configName }}</span>
+                      <el-tag v-if="row.isActive" size="small" type="warning" effect="dark" class="active-tag">启用中</el-tag>
+                    </div>
+                    <div v-if="row.remark" class="config-remark-text">{{ row.remark }}</div>
+                  </div>
                 </div>
               </template>
             </el-table-column>
 
             <!-- 类型 -->
-            <el-table-column label="类型" width="115" align="center">
+            <el-table-column label="类型" min-width="108" align="center">
               <template #default="{ row }">
                 <el-tag :type="row.llmMode === 'offline' ? 'success' : 'primary'" size="small" effect="plain">
                   {{ row.llmMode === 'offline' ? 'Ollama 离线' : '在线 API' }}
@@ -188,14 +193,19 @@
                 <div class="name-cell">
                   <el-icon v-if="row.isActive" class="row-active-icon"><CircleCheckFilled /></el-icon>
                   <span v-else class="row-inactive-dot"></span>
-                  <span class="config-name-text" :class="{ 'is-active-name': row.isActive }">{{ row.configName }}</span>
-                  <el-tag v-if="row.isActive" size="small" type="warning" effect="dark" class="active-tag">启用中</el-tag>
+                  <div class="name-cell-content">
+                    <div class="name-cell-top">
+                      <span class="config-name-text" :class="{ 'is-active-name': row.isActive }">{{ row.configName }}</span>
+                      <el-tag v-if="row.isActive" size="small" type="warning" effect="dark" class="active-tag">启用中</el-tag>
+                    </div>
+                    <div v-if="row.remark" class="config-remark-text">{{ row.remark }}</div>
+                  </div>
                 </div>
               </template>
             </el-table-column>
 
             <!-- 类型 -->
-            <el-table-column label="类型" width="115" align="center">
+            <el-table-column label="类型" min-width="108" align="center">
               <template #default="{ row }">
                 <el-tag :type="row.llmMode === 'offline' ? 'success' : 'primary'" size="small" effect="plain">
                   {{ row.llmMode === 'offline' ? 'Ollama 离线' : '在线 API' }}
@@ -915,6 +925,31 @@ onMounted(loadData)
   .active-tag {
     flex-shrink: 0;
   }
+}
+
+.name-cell-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+
+  .name-cell-top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: nowrap;
+  }
+}
+
+.config-remark-text {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  opacity: 0.8;
 }
 
 .url-text {

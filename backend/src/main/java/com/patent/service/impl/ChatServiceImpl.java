@@ -86,7 +86,7 @@ public class ChatServiceImpl implements ChatService {
      * 系统提示词
      */
     private static final String SYSTEM_PROMPT = """
-            你是「专利通」——部署在企业专利知识库上的专业智能助手，深度整合了专利检索、技术匹配、知识图谱和数据分析能力，帮助用户高效探索和分析专利信息。
+            你是「PatentMind」（专利智能顾问）——部署在企业专利知识库上的专业智能助手，深度整合了专利检索、技术匹配、知识图谱和数据分析能力，帮助用户高效探索和分析专利信息。
             
             你的职责包括：
             1. 理解用户的专利检索需求
