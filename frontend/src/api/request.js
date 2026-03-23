@@ -100,9 +100,11 @@ service.interceptors.response.use(
     
     if (error.response) {
       const status = error.response.status
+      // 优先使用后端返回的业务消息
+      const backendMessage = error.response.data?.message
       switch (status) {
         case 400:
-          message = '请求参数错误'
+          message = backendMessage || '请求参数错误'
           break
         case 401:
           // 401错误统一处理，不弹出消息
@@ -110,16 +112,17 @@ service.interceptors.response.use(
           showMessage = false
           break
         case 403:
-          message = '拒绝访问'
+          // 优先显示后端返回的权限描述，无则显示通用提示
+          message = backendMessage || '无权限执行该操作'
           break
         case 404:
-          message = '请求资源不存在'
+          message = backendMessage || '请求资源不存在'
           break
         case 500:
-          message = '服务器内部错误'
+          message = backendMessage || '服务器内部错误'
           break
         default:
-          message = error.response.data?.message || `请求失败(${status})`
+          message = backendMessage || `请求失败(${status})`
       }
     } else if (error.code === 'ECONNABORTED') {
       message = '请求超时，请稍后重试'

@@ -465,13 +465,23 @@ const handleUpload = async () => {
     
     const patentId = uploadRes.data.patentId
     
-    const processRes = await patentApi.process(patentId)
-    if (processRes.code === 200) {
-      ElMessage.success('上传成功，正在处理中...')
+    try {
+      const processRes = await patentApi.process(patentId)
+      if (processRes.code === 200) {
+        ElMessage.success('上传成功，正在处理中...')
+        resetFileForm()
+        router.push({ path: '/patent/list', query: { polling: 'true' } })
+      } else {
+        // 上传成功但触发处理失败（非200业务错误已由 request.js 弹出），跳转列表页
+        resetFileForm()
+        router.push('/patent/list')
+      }
+    } catch (processError) {
+      // HTTP 错误（403等）已由 request.js 拦截器统一弹出消息
+      // 专利已上传成功，只是处理触发失败，仍跳转列表页
+      console.warn('处理触发失败（专利已上传）:', processError)
       resetFileForm()
-      router.push({ path: '/patent/list', query: { polling: 'true' } })
-    } else {
-      ElMessage.warning(processRes.message || '处理任务提交失败，请稍后重试')
+      router.push('/patent/list')
     }
   } catch (error) {
     console.error('上传处理失败:', error)
@@ -509,13 +519,23 @@ const handleTextSubmit = async () => {
       
       const patentId = createRes.data.patentId
       
-      const processRes = await patentApi.process(patentId)
-      if (processRes.code === 200) {
-        ElMessage.success('提交成功，正在处理中...')
+      try {
+        const processRes = await patentApi.process(patentId)
+        if (processRes.code === 200) {
+          ElMessage.success('提交成功，正在处理中...')
+          resetTextForm()
+          router.push({ path: '/patent/list', query: { polling: 'true' } })
+        } else {
+          // 录入成功但触发处理失败（非200业务错误已由 request.js 弹出），跳转列表页
+          resetTextForm()
+          router.push('/patent/list')
+        }
+      } catch (processError) {
+        // HTTP 错误（403等）已由 request.js 拦截器统一弹出消息
+        // 专利已录入成功，只是处理触发失败，仍跳转列表页
+        console.warn('处理触发失败（专利已录入）:', processError)
         resetTextForm()
-        router.push({ path: '/patent/list', query: { polling: 'true' } })
-      } else {
-        ElMessage.warning(processRes.message || '处理任务提交失败，请稍后重试')
+        router.push('/patent/list')
       }
     } catch (error) {
       console.error('提交处理失败:', error)

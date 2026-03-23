@@ -91,9 +91,12 @@ public class GraphServiceImpl implements GraphService {
                     .orElse(new IpcNode());
             ipcNode.setIpcCode(ipcCode);
             ipcNode.setLevel(domain.getDomainLevel());
+            // 组合 code + desc，如 "A61K9/70 医药、牙科或梳妆..."，确保节点名称完整可识别
+            String combinedName = ipcCode;
             if (StringUtils.hasText(domain.getDomainDesc())) {
-                ipcNode.setName(domain.getDomainDesc());
+                combinedName = ipcCode + " " + domain.getDomainDesc().trim();
             }
+            ipcNode.setName(combinedName);
             ipcNode.setParentCode(resolveParentCode(ipcCode));
             ipcNodeRepository.save(ipcNode);
             ipcNodes.add(ipcNode);

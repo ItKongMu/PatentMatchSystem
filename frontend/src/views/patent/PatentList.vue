@@ -42,7 +42,7 @@
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ successCount }}</span>
-          <span class="stat-label">已处理</span>
+          <span class="stat-label">本页已处理</span>
         </div>
       </div>
       
@@ -61,7 +61,7 @@
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ processingCount }}</span>
-          <span class="stat-label">处理中</span>
+          <span class="stat-label">本页处理中</span>
         </div>
       </div>
       
@@ -74,7 +74,7 @@
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ pendingCount }}</span>
-          <span class="stat-label">待处理</span>
+          <span class="stat-label">本页待处理</span>
         </div>
       </div>
     </div>
@@ -205,7 +205,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="200" align="center" fixed="right">
+        <el-table-column label="操作" width="240" align="center" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
               <el-button size="small" type="primary" link @click="viewDetail(row.id)">
@@ -221,9 +221,18 @@
                 处理
               </el-button>
               <el-button
-                v-if="row.parseStatus === 'SUCCESS'"
+                v-if="isAdmin && (row.parseStatus === 'SUCCESS' || row.parseStatus === 'FAILED' || row.parseStatus === 'PENDING')"
                 size="small"
                 type="warning"
+                link
+                @click="handleReprocess(row)"
+              >
+                重处理
+              </el-button>
+              <el-button
+                v-if="row.parseStatus === 'SUCCESS'"
+                size="small"
+                type="primary"
                 link
                 @click="handleMatch(row)"
               >
@@ -263,9 +272,12 @@ import { ref, reactive, onMounted, onUnmounted, onActivated, computed, watch } f
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { patentApi } from '@/api/patent'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const route = useRoute()
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.isAdmin)
 
 const loading = ref(false)
 const patentList = ref([])
@@ -450,9 +462,35 @@ const handleProcess = async (row) => {
       await fetchList()
       startPolling()
     }
+    // 非200的业务错误已由 request.js 统一弹出错误消息
   } catch (error) {
     if (error !== 'cancel') {
+      // HTTP 错误（403/400/500等）已由 request.js 拦截器统一弹出消息
+      // 此处仅记录日志，避免重复弹窗
       console.error('处理失败:', error)
+    }
+  }
+}
+
+const handleReprocess = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要重新处理专利"${row.title || '未命名'}"吗？这将清除已有的实体、领域和向量数据，重新从头处理。`,
+      '重新处理确认',
+      { type: 'warning' }
+    )
+    
+    const res = await patentApi.reprocess(row.id)
+    if (res.code === 200) {
+      ElMessage.success('已开始重新处理')
+      await fetchList()
+      startPolling()
+    }
+    // 非200的业务错误已由 request.js 统一弹出错误消息
+  } catch (error) {
+    if (error !== 'cancel') {
+      // HTTP 错误已由 request.js 拦截器统一弹出消息
+      console.error('重新处理失败:', error)
     }
   }
 }
@@ -477,8 +515,10 @@ const handleDelete = async (row) => {
       ElMessage.success('删除成功')
       fetchList()
     }
+    // 非200的业务错误已由 request.js 统一弹出错误消息
   } catch (error) {
     if (error !== 'cancel') {
+      // HTTP 错误（403等）已由 request.js 拦截器统一弹出消息
       console.error('删除失败:', error)
     }
   }

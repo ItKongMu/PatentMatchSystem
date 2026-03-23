@@ -612,8 +612,9 @@ const handleResize = () => {
   })
 }
 
-// ---- keep-alive 激活时重新同步 ECharts 尺寸 ----
+// ---- keep-alive 激活时重新同步 ECharts 尺寸，并处理路由跳转参数 ----
 onActivated(() => {
+  // 1. 同步 ECharts 容器尺寸
   if (chartInstance && wrapRef.value) {
     nextTick(() => {
       chartInstance.resize({
@@ -621,6 +622,14 @@ onActivated(() => {
         height: wrapRef.value.clientHeight
       })
     })
+  }
+
+  // 2. 若路由携带 mode + q 参数（如从专利详情页跳转），自动填充并查询
+  const { mode, q } = route.query
+  if (mode && q) {
+    queryMode.value = mode
+    queryInput.value = q
+    handleQuery()
   }
 })
 

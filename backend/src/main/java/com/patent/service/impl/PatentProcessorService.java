@@ -220,21 +220,36 @@ public class PatentProcessorService {
 
     /**
      * 执行批量向量化和ES索引操作
+     *
+     * <p>修复：批量向量化失败降级时，先将每条专利状态置为 VECTORIZING 再处理，
+     * 确保状态机流转正确，不会遗留 EXTRACTING 状态。</p>
      */
     private void executeBatchOperations(List<VectorService.PatentVectorData> vectorDataBatch, List<Long> esBatch) {
         // 批量向量化
         try {
             log.info("执行批量向量化, 数量: {}", vectorDataBatch.size());
+            // 先将所有专利状态置为 VECTORIZING
+            for (VectorService.PatentVectorData data : vectorDataBatch) {
+                patentMapper.updateParseStatus(data.patent().getId(), "VECTORIZING", null);
+            }
             Map<Long, String> vectorIdMap = vectorService.batchStorePatentVectors(vectorDataBatch);
-            
+
             // 保存向量映射记录
-            String embeddingModel = "online".equals(patentConfig.getLlmMode()) 
+            String embeddingModel = "online".equals(patentConfig.getLlmMode())
                     ? "text-embedding-v3" : "nomic-embed-text";
-            
+
             for (VectorService.PatentVectorData data : vectorDataBatch) {
                 Long patentId = data.patent().getId();
                 String vectorId = vectorIdMap.get(patentId);
                 if (vectorId != null) {
+                    // 清理旧向量记录（重处理场景）
+                    PatentVector oldVector = patentVectorMapper.selectByPatentId(patentId);
+                    if (oldVector != null) {
+                        try {
+                            vectorService.deleteVector(oldVector.getVectorId());
+                        } catch (Exception ignored) {}
+                        patentVectorMapper.deleteByPatentId(patentId);
+                    }
                     PatentVector pv = new PatentVector();
                     pv.setPatentId(patentId);
                     pv.setVectorId(vectorId);
@@ -242,11 +257,13 @@ public class PatentProcessorService {
                     pv.setVectorDim(patentConfig.getVectorDimension());
                     patentVectorMapper.insert(pv);
                     patentMapper.updateParseStatus(patentId, "SUCCESS", null);
+                } else {
+                    patentMapper.updateParseStatus(patentId, "FAILED", "批量向量化未返回 vectorId");
                 }
             }
         } catch (Exception e) {
-            log.error("批量向量化失败", e);
-            // 降级为逐个处理
+            log.error("批量向量化失败，降级为逐个处理", e);
+            // 降级为逐个处理，状态已是 VECTORIZING，storeVector 内部会处理
             for (VectorService.PatentVectorData data : vectorDataBatch) {
                 try {
                     storeVector(data.patent());
@@ -265,7 +282,6 @@ public class PatentProcessorService {
             log.info("批量ES索引同步完成, 成功: {}", synced);
         } catch (Exception e) {
             log.warn("批量ES索引同步失败，尝试逐个同步", e);
-            // 降级为逐个同步
             for (Long patentId : esBatch) {
                 try {
                     searchService.syncPatentToEs(patentId);
@@ -571,9 +587,21 @@ public class PatentProcessorService {
 
     /**
      * 提取实体和领域
+     *
+     * <p>修复：重复处理（手动触发 /process/{id}）时，先清除旧的实体和领域记录，
+     * 避免数据重复叠加，导致向量文本越来越长、检索噪声增大。</p>
      */
     @Transactional
     public void extractEntitiesAndDomains(Patent patent) {
+        Long patentId = patent.getId();
+
+        // 清除旧的实体和领域数据（重处理幂等性保证）
+        int deletedEntities = patentEntityMapper.deleteByPatentId(patentId);
+        int deletedDomains = patentDomainMapper.deleteByPatentId(patentId);
+        if (deletedEntities > 0 || deletedDomains > 0) {
+            log.info("清除旧实体/领域数据: patentId={}, entities={}, domains={}", patentId, deletedEntities, deletedDomains);
+        }
+
         // 构造专利文本（标题 + 摘要）
         String patentText = String.format("标题：%s\n摘要：%s",
                 patent.getTitle() != null ? patent.getTitle() : "",
@@ -585,7 +613,7 @@ public class PatentProcessorService {
         // 保存实体
         for (LlmService.EntityInfo entity : result.entities()) {
             PatentEntity pe = new PatentEntity();
-            pe.setPatentId(patent.getId());
+            pe.setPatentId(patentId);
             pe.setEntityName(entity.text());
             pe.setEntityType(entity.type());
             pe.setImportance(entity.importance());
@@ -598,23 +626,23 @@ public class PatentProcessorService {
 
             // 部
             if (domain.section() != null && !domain.section().isEmpty()) {
-                saveDomain(patent.getId(), domain.section(), 1, "部-" + domain.section());
+                saveDomain(patentId, domain.section(), 1, "部-" + domain.section());
             }
             // 大类
             if (domain.mainClass() != null && !domain.mainClass().isEmpty()) {
-                saveDomain(patent.getId(), domain.section() + domain.mainClass(), 2, "大类");
+                saveDomain(patentId, domain.section() + domain.mainClass(), 2, "大类");
             }
             // 小类
             if (domain.subclass() != null && !domain.subclass().isEmpty()) {
-                saveDomain(patent.getId(), domain.section() + domain.mainClass() + domain.subclass(), 3, "小类");
+                saveDomain(patentId, domain.section() + domain.mainClass() + domain.subclass(), 3, "小类");
             }
             // 完整编码
             if (domain.fullCode() != null && !domain.fullCode().isEmpty()) {
-                saveDomain(patent.getId(), domain.fullCode(), 5, domain.description());
+                saveDomain(patentId, domain.fullCode(), 5, domain.description());
             }
         }
 
-        log.info("实体和领域提取完成: {}, 实体数: {}", patent.getId(), result.entities().size());
+        log.info("实体和领域提取完成: {}, 实体数: {}", patentId, result.entities().size());
     }
 
     /**
@@ -639,26 +667,102 @@ public class PatentProcessorService {
     }
 
     /**
-     * 存储向量
+     * 存储向量（含旧向量清理 + 应用层重试）
+     *
+     * <p>修复说明：
+     * <ul>
+     *   <li>幂等性：重处理时先清除 Qdrant 和 MySQL 中旧向量记录，避免 Qdrant 中产生孤立向量。</li>
+     *   <li>网络容错：在线模式下调用 DashScope Embedding API 时，偶发 "Connection reset"
+     *       网络瞬时故障。Spring AI 的 RetryTemplate 会自动重试（最多 5 次，指数退避），
+     *       但若重试全部耗尽仍失败，此处再做应用层兜底重试，避免单次网络抖动导致整个处理流程失败。</li>
+     * </ul>
+     * </p>
      */
     @Transactional
     public void storeVector(Patent patent) {
-        List<PatentEntity> entities = patentEntityMapper.selectByPatentId(patent.getId());
-        List<PatentDomain> domains = patentDomainMapper.selectByPatentId(patent.getId());
+        Long patentId = patent.getId();
+        List<PatentEntity> entities = patentEntityMapper.selectByPatentId(patentId);
+        List<PatentDomain> domains = patentDomainMapper.selectByPatentId(patentId);
 
-        String vectorId = vectorService.storePatentVector(patent, entities, domains);
+        // 幂等：清除旧的向量记录（重处理场景）
+        PatentVector oldVector = patentVectorMapper.selectByPatentId(patentId);
+        if (oldVector != null) {
+            try {
+                vectorService.deleteVector(oldVector.getVectorId());
+                log.info("已清除旧向量: patentId={}, vectorId={}", patentId, oldVector.getVectorId());
+            } catch (Exception e) {
+                log.warn("清除旧向量失败（继续处理）: patentId={}, vectorId={}", patentId, oldVector.getVectorId(), e);
+            }
+            patentVectorMapper.deleteByPatentId(patentId);
+        }
+
+        // 应用层重试：最多尝试 3 次，每次间隔递增（3s / 6s / 9s）
+        // 用于兜底 Spring AI RetryTemplate 重试耗尽后的瞬时网络抖动
+        int maxRetries = 3;
+        long retryIntervalMs = 3000L;
+        String vectorId = null;
+        Exception lastException = null;
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                vectorId = vectorService.storePatentVector(patent, entities, domains);
+                lastException = null;
+                break; // 成功，跳出重试循环
+            } catch (Exception e) {
+                lastException = e;
+                boolean isConnectionReset = isConnectionResetException(e);
+                if (attempt < maxRetries && isConnectionReset) {
+                    log.warn("向量存储遭遇网络故障（Connection reset），第 {}/{} 次重试，等待 {}ms，patentId: {}",
+                            attempt, maxRetries, retryIntervalMs * attempt, patentId);
+                    try {
+                        Thread.sleep(retryIntervalMs * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("向量存储被中断", ie);
+                    }
+                } else {
+                    // 非网络故障或重试耗尽，直接抛出
+                    log.error("向量存储失败（第 {}/{} 次），patentId: {}", attempt, maxRetries, patentId, e);
+                    throw new RuntimeException("向量存储失败: " + e.getMessage(), e);
+                }
+            }
+        }
+
+        if (lastException != null) {
+            throw new RuntimeException("向量存储失败（重试 " + maxRetries + " 次后仍失败）: " + lastException.getMessage(), lastException);
+        }
 
         // 保存向量映射
         PatentVector pv = new PatentVector();
-        pv.setPatentId(patent.getId());
+        pv.setPatentId(patentId);
         pv.setVectorId(vectorId);
         // 根据LLM模式设置embedding模型名称
-        String embeddingModel = "online".equals(patentConfig.getLlmMode()) 
+        String embeddingModel = "online".equals(patentConfig.getLlmMode())
                 ? "text-embedding-v3" : "nomic-embed-text";
         pv.setEmbeddingModel(embeddingModel);
         pv.setVectorDim(patentConfig.getVectorDimension());
         patentVectorMapper.insert(pv);
 
-        log.info("向量存储完成: {}, vectorId: {}", patent.getId(), vectorId);
+        log.info("向量存储完成: {}, vectorId: {}", patentId, vectorId);
+    }
+
+    /**
+     * 判断异常是否由网络连接重置引起（Connection reset）
+     * 遍历异常链，只要发现 SocketException/IOException 且消息含 "Connection reset" 即返回 true
+     */
+    private boolean isConnectionResetException(Throwable e) {
+        Throwable cause = e;
+        while (cause != null) {
+            if (cause instanceof java.net.SocketException
+                    || cause instanceof java.io.IOException) {
+                String msg = cause.getMessage();
+                if (msg != null && msg.toLowerCase().contains("connection reset")) {
+                    return true;
+                }
+            }
+            // 防止循环引用
+            cause = (cause.getCause() == cause) ? null : cause.getCause();
+        }
+        return false;
     }
 }

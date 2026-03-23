@@ -93,6 +93,22 @@ export const patentApi = {
       timeout: PATENT_API_CONFIG.PROCESS_TIMEOUT
     })
   },
+
+  /**
+   * 重新处理专利（仅管理员）
+   * @description 将专利状态重置为 PENDING 并重新触发处理流程，用于修复失败或异常的专利
+   * @param {number} id - 专利 ID
+   * @returns {Promise<{code: number, message: string, data: null}>}
+   * @example
+   * await patentApi.reprocess(123)
+   */
+  reprocess(id) {
+    return request({
+      url: `/patent/reprocess/${id}`,
+      method: 'post',
+      timeout: PATENT_API_CONFIG.PROCESS_TIMEOUT
+    })
+  },
   
   /**
    * 获取专利详情

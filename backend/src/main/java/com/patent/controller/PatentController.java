@@ -48,12 +48,20 @@ public class PatentController {
         return Result.success("录入成功", patentService.createPatentFromText(dto));
     }
 
-    @Operation(summary = "触发专利处理流程")
+    @Operation(summary = "触发专利处理流程（仅管理员或专利创建者）")
     @SaCheckLogin
     @PostMapping("/process/{id}")
     public Result<Void> processPatent(@PathVariable("id") Long id) {
         patentService.processPatent(id);
         return Result.success("处理任务已提交", null);
+    }
+
+    @Operation(summary = "重新处理专利（仅管理员）")
+    @SaCheckLogin
+    @PostMapping("/reprocess/{id}")
+    public Result<Void> reprocessPatent(@PathVariable("id") Long id) {
+        patentService.reprocessPatent(id);
+        return Result.success("重新处理任务已提交", null);
     }
 
     @Operation(summary = "获取专利详情")

@@ -66,6 +66,19 @@
               </el-icon>
               触发处理
             </el-button>
+            <el-button
+              v-if="isAdmin"
+              type="warning"
+              @click="handleReprocess"
+            >
+              <el-icon>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="1 4 1 10 7 10"/>
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                </svg>
+              </el-icon>
+              重新处理
+            </el-button>
           </div>
         </div>
         
@@ -278,12 +291,15 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { patentApi } from '@/api/patent'
 import FavoriteButton from '@/components/patent/FavoriteButton.vue'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.isAdmin)
 
 const loading = ref(false)
 const patent = ref(null)
@@ -351,8 +367,31 @@ const handleProcess = async () => {
       ElMessage.success('已开始处理')
       fetchDetail()
     }
+    // 非200的业务错误已由 request.js 统一弹出错误消息
   } catch (error) {
+    // HTTP 错误（403/400/500等）已由 request.js 拦截器统一弹出消息
     console.error('处理失败:', error)
+  }
+}
+
+const handleReprocess = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要重新处理该专利吗？这将清除已有的实体、领域和向量数据，重新从头处理。`,
+      '重新处理确认',
+      { type: 'warning' }
+    )
+    const res = await patentApi.reprocess(patent.value.id)
+    if (res.code === 200) {
+      ElMessage.success('已开始重新处理')
+      fetchDetail()
+    }
+    // 非200的业务错误已由 request.js 统一弹出错误消息
+  } catch (error) {
+    if (error !== 'cancel') {
+      // HTTP 错误已由 request.js 拦截器统一弹出消息
+      console.error('重新处理失败:', error)
+    }
   }
 }
 

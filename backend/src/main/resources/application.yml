@@ -111,12 +111,15 @@ spring:
         initialize-schema: true
 
     # 重试配置
+    # Connection reset 属于网络瞬时故障（TransientAiException），Spring AI 会自动重试
+    # 调大 initial-interval 和 max-interval，给服务端足够恢复时间
     retry:
-      max-attempts: 3
+      max-attempts: 5
       backoff:
-        initial-interval: 1000
-        multiplier: 2
-        max-interval: 10000
+        initial-interval: 2000    # 首次重试等待 2s
+        multiplier: 2             # 指数退避：2s → 4s → 8s → 16s
+        max-interval: 30000       # 最长等待 30s，防止无限等待
+      on-client-errors: false     # 4xx 不重试（参数错误重试无意义）
 
 # MyBatis-Plus配置
 mybatis-plus:

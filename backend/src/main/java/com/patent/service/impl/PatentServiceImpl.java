@@ -51,6 +51,7 @@ public class PatentServiceImpl implements PatentService {
     private final PatentProcessorService patentProcessorService;
     private final SearchService searchService;
     private final GraphService graphService;
+    private final SysUserMapper sysUserMapper;
 
     @Override
     @Transactional
@@ -167,7 +168,42 @@ public class PatentServiceImpl implements PatentService {
 
     @Override
     public void processPatent(Long patentId) {
-        // 委托给异步处理服务
+        Patent patent = patentMapper.selectById(patentId);
+        if (patent == null) {
+            throw new BusinessException("专利不存在");
+        }
+
+        Long currentUserId = getCurrentUserId();
+        // 校验权限：创建者本人或管理员可触发
+        if (!isAdminUser(currentUserId) && !currentUserId.equals(patent.getCreatedBy())) {
+            throw new BusinessException("无权限处理此专利");
+        }
+
+        // 仅允许 PENDING / FAILED 状态的专利触发（避免重复处理正在进行的专利）
+        String status = patent.getParseStatus();
+        if (!"PENDING".equals(status) && !"FAILED".equals(status)) {
+            throw new BusinessException("专利当前状态为 " + status + "，不可触发处理（请使用重新处理接口）");
+        }
+
+        patentProcessorService.processPatentAsync(patentId);
+    }
+
+    @Override
+    public void reprocessPatent(Long patentId) {
+        Patent patent = patentMapper.selectById(patentId);
+        if (patent == null) {
+            throw new BusinessException("专利不存在");
+        }
+
+        Long currentUserId = getCurrentUserId();
+        // 仅管理员可强制重新处理
+        if (!isAdminUser(currentUserId)) {
+            throw new BusinessException("无权限执行重新处理，仅管理员可操作");
+        }
+
+        log.info("管理员 {} 触发专利重新处理: patentId={}, currentStatus={}", currentUserId, patentId, patent.getParseStatus());
+        // 重置状态为 PENDING，再触发异步处理
+        patentMapper.updateParseStatus(patentId, "PENDING", null);
         patentProcessorService.processPatentAsync(patentId);
     }
 
@@ -223,25 +259,36 @@ public class PatentServiceImpl implements PatentService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deletePatent(Long patentId) {
         Patent patent = patentMapper.selectById(patentId);
         if (patent == null) {
             throw new BusinessException("专利不存在");
         }
 
-        // 删除向量
+        // 权限校验：创建者本人或管理员可删除
+        Long currentUserId = getCurrentUserId();
+        if (!isAdminUser(currentUserId)
+                && (patent.getCreatedBy() == null || !patent.getCreatedBy().equals(currentUserId))) {
+            throw new BusinessException("无权限删除此专利");
+        }
+
+        // 删除 Qdrant 向量（外部服务，失败不回滚 MySQL 事务）
         PatentVector vector = patentVectorMapper.selectByPatentId(patentId);
         if (vector != null) {
-            vectorService.deleteVector(vector.getVectorId());
+            try {
+                vectorService.deleteVector(vector.getVectorId());
+            } catch (Exception e) {
+                log.warn("删除 Qdrant 向量失败（继续执行）: vectorId={}", vector.getVectorId(), e);
+            }
             patentVectorMapper.deleteByPatentId(patentId);
         }
 
-        // 删除关联数据
+        // 删除关联数据（MySQL 事务内）
         patentEntityMapper.deleteByPatentId(patentId);
         patentDomainMapper.deleteByPatentId(patentId);
 
-        // 删除MinIO文件
+        // 删除MinIO文件（外部服务，失败不回滚）
         if (patent.getFilePath() != null) {
             try {
                 fileService.deleteFile(patent.getFilePath());
@@ -250,7 +297,7 @@ public class PatentServiceImpl implements PatentService {
             }
         }
 
-        // 从ES删除索引
+        // 从ES删除索引（外部服务，失败不回滚）
         try {
             searchService.deleteFromEs(patentId);
         } catch (Exception e) {
@@ -272,13 +319,26 @@ public class PatentServiceImpl implements PatentService {
     }
 
     /**
-     * 获取当前用户ID
+     * 获取当前用户ID（未登录时返回 null）
      */
     private Long getCurrentUserId() {
         try {
             return authService.getCurrentUserId();
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * 判断指定用户是否为管理员（直接查 SysUserMapper）
+     */
+    private boolean isAdminUser(Long userId) {
+        if (userId == null) return false;
+        try {
+            SysUser user = sysUserMapper.selectById(userId);
+            return user != null && "admin".equals(user.getRole());
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -324,7 +384,6 @@ public class PatentServiceImpl implements PatentService {
     }
 
     @Override
-    @Transactional
     public CsvImportResultVO importCsv(MultipartFile file, boolean autoProcess) {
         validateCsvFile(file);
         List<PatentCsvDTO> dataList = parseCsvFile(file);
@@ -332,13 +391,23 @@ public class PatentServiceImpl implements PatentService {
     }
 
     @Override
-    @Transactional
     public CsvImportResultVO importCsvData(List<PatentCsvDTO> dataList, boolean autoProcess) {
         return doImport(dataList, autoProcess);
     }
 
     /**
      * 执行导入
+     *
+     * <p>修复说明：
+     * <ul>
+     *   <li>去除方法级 @Transactional：原来整个循环在一个大事务中，若某条记录失败会回滚所有已成功记录；
+     *       改为每条记录独立事务（通过 insertSinglePatent 方法），互不影响。</li>
+     *   <li>异步处理在事务外触发：原代码在 @Transactional 方法内部调用异步处理，事务尚未提交导致
+     *       异步线程查不到刚插入的 patent 记录；现在事务提交后再调用异步处理。</li>
+     *   <li>batchSize 修正：batchSize 是"每批并行处理的专利数"，应固定为合理值（默认10），
+     *       而非 min(20, total)（当只有1条时 batchSize=1 无意义）。</li>
+     * </ul>
+     * </p>
      */
     private CsvImportResultVO doImport(List<PatentCsvDTO> dataList, boolean autoProcess) {
         CsvImportResultVO result = new CsvImportResultVO();
@@ -364,39 +433,9 @@ public class PatentServiceImpl implements PatentService {
             }
 
             try {
-                // 创建专利记录
-                Patent patent = new Patent();
-                patent.setPublicationNo(dto.getPublicationNo() != null ? dto.getPublicationNo().trim() : null);
-                patent.setTitle(dto.getTitle().trim());
-                patent.setApplicant(dto.getApplicant() != null ? dto.getApplicant().trim() : null);
-                patent.setPatentAbstract(dto.getPatentAbstract().trim());
-                patent.setSourceType("CSV");
-                patent.setParseStatus("PENDING");
-                patent.setCreatedBy(userId);
-
-                // 解析日期
-                if (dto.getPublicationDate() != null && !dto.getPublicationDate().trim().isEmpty()) {
-                    try {
-                        patent.setPublicationDate(parseDate(dto.getPublicationDate().trim()));
-                    } catch (Exception e) {
-                        log.warn("日期解析失败: {}", dto.getPublicationDate());
-                    }
-                }
-
-                // 如果有正文，生成文本文件存入MinIO
-                if (dto.getFullText() != null && !dto.getFullText().trim().isEmpty()) {
-                    String filePath = generateAndStorePatentTextFile(dto, patent);
-                    patent.setFilePath(filePath);
-                }
-
-                patentMapper.insert(patent);
-                
-                // 保存IPC分类到PatentDomain表
-                if (dto.getIpcClassification() != null && !dto.getIpcClassification().trim().isEmpty()) {
-                    saveIpcClassification(patent.getId(), dto.getIpcClassification().trim());
-                }
-                
-                result.addSuccess(patent.getId());
+                // 每条记录独立事务插入，互不影响
+                Long patentId = insertSinglePatent(dto, userId);
+                result.addSuccess(patentId);
             } catch (Exception e) {
                 log.error("导入专利失败: {}", dto, e);
                 dto.setErrorMessage("导入失败：" + e.getMessage());
@@ -405,21 +444,21 @@ public class PatentServiceImpl implements PatentService {
             }
         }
 
-        // 如果需要自动处理，使用批处理方式提高效率
+        // 事务已全部提交后，再触发异步处理（避免异步线程查不到刚插入的记录）
         if (autoProcess && !result.getImportedPatentIds().isEmpty()) {
+            List<Long> patentIds = result.getImportedPatentIds();
+            // batchSize 固定为10：每批向量化10条，平衡 API 并发压力与处理速度
+            int batchSize = 10;
             try {
-                // 使用批处理方式处理（批次大小默认20）
-                int batchSize = Math.min(20, result.getImportedPatentIds().size());
-                patentProcessorService.batchProcessPatentsAsync(result.getImportedPatentIds(), batchSize);
-                log.info("已提交批量处理任务, 数量: {}, 批次大小: {}", result.getImportedPatentIds().size(), batchSize);
+                patentProcessorService.batchProcessPatentsAsync(patentIds, batchSize);
+                log.info("已提交批量处理任务, 数量: {}, 每批大小: {}", patentIds.size(), batchSize);
             } catch (Exception e) {
                 log.warn("提交批量处理任务失败，降级为逐个处理: {}", e.getMessage());
-                // 降级为逐个处理
-                for (Long patentId : result.getImportedPatentIds()) {
+                for (Long patentId : patentIds) {
                     try {
                         patentProcessorService.processPatentAsync(patentId);
                     } catch (Exception ex) {
-                        log.warn("自动处理专利{}失败: {}", patentId, ex.getMessage());
+                        log.warn("自动处理专利 {} 失败: {}", patentId, ex.getMessage());
                     }
                 }
             }
@@ -428,6 +467,48 @@ public class PatentServiceImpl implements PatentService {
         result.buildMessage();
         log.info("CSV导入完成: {}", result.getMessage());
         return result;
+    }
+
+    /**
+     * 单条专利记录独立事务插入
+     * 独立事务确保：每条记录成功/失败互不影响；事务提交后异步处理可见
+     *
+     * @return 新插入的专利 ID
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Long insertSinglePatent(PatentCsvDTO dto, Long userId) {
+        Patent patent = new Patent();
+        patent.setPublicationNo(dto.getPublicationNo() != null ? dto.getPublicationNo().trim() : null);
+        patent.setTitle(dto.getTitle().trim());
+        patent.setApplicant(dto.getApplicant() != null ? dto.getApplicant().trim() : null);
+        patent.setPatentAbstract(dto.getPatentAbstract().trim());
+        patent.setSourceType("CSV");
+        patent.setParseStatus("PENDING");
+        patent.setCreatedBy(userId);
+
+        // 解析日期
+        if (dto.getPublicationDate() != null && !dto.getPublicationDate().trim().isEmpty()) {
+            try {
+                patent.setPublicationDate(parseDate(dto.getPublicationDate().trim()));
+            } catch (Exception e) {
+                log.warn("日期解析失败: {}", dto.getPublicationDate());
+            }
+        }
+
+        // 如果有正文，生成文本文件存入MinIO
+        if (dto.getFullText() != null && !dto.getFullText().trim().isEmpty()) {
+            String filePath = generateAndStorePatentTextFile(dto, patent);
+            patent.setFilePath(filePath);
+        }
+
+        patentMapper.insert(patent);
+
+        // 保存IPC分类到PatentDomain表
+        if (dto.getIpcClassification() != null && !dto.getIpcClassification().trim().isEmpty()) {
+            saveIpcClassification(patent.getId(), dto.getIpcClassification().trim());
+        }
+
+        return patent.getId();
     }
     
     /**

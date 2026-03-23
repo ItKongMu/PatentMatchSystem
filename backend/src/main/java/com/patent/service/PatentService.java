@@ -35,11 +35,18 @@ public interface PatentService {
     UploadResultVO createPatentFromText(PatentTextDTO dto);
 
     /**
-     * 触发专利处理流程
+     * 触发专利处理流程（仅限创建者或管理员，专利须为 PENDING/FAILED 状态）
      *
      * @param patentId 专利ID
      */
     void processPatent(Long patentId);
+
+    /**
+     * 强制重新处理专利（仅限管理员，无状态限制）
+     *
+     * @param patentId 专利ID
+     */
+    void reprocessPatent(Long patentId);
 
     /**
      * 获取专利详情
