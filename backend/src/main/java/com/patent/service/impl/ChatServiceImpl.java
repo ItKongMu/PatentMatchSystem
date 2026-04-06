@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.alibaba.fastjson2.JSON;
 import com.patent.common.PageResult;
 import com.patent.common.exception.BusinessException;
+import com.patent.config.DynamicLlmFactory;
 import com.patent.config.MongoChatMemoryRepository;
 import com.patent.model.dto.ChatMessageDTO;
 import com.patent.model.dto.FavoriteDTO;
@@ -31,7 +32,6 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.codec.ServerSentEvent;
@@ -55,7 +55,7 @@ import java.util.stream.Collectors;
 @Service
 public class ChatServiceImpl implements ChatService {
 
-    private final ChatClient chatClient;
+    private final DynamicLlmFactory dynamicLlmFactory;
     private final SearchService searchService;
     private final MatchService matchService;
     private final PatentService patentService;
@@ -83,7 +83,7 @@ public class ChatServiceImpl implements ChatService {
     private final ThreadLocal<ChatResponseVO.GraphData> graphDataHolder = new ThreadLocal<>();
 
     /**
-     * 系统提示词
+     * 支持 Function Calling 的模型使用此完整 System Prompt（含工具使用指南）
      */
     private static final String SYSTEM_PROMPT = """
             你是「PatentMind」（专利智能顾问）——部署在企业专利知识库上的专业智能助手，深度整合了专利检索、技术匹配、知识图谱和数据分析能力，帮助用户高效探索和分析专利信息。
@@ -156,7 +156,33 @@ public class ChatServiceImpl implements ChatService {
 
             """;
 
-    public ChatServiceImpl(@Qualifier("chatChatModel") ChatModel chatModel,
+    /**
+     * 不支持 Function Calling 的本地模型（如 deepseek-r1:7b）使用此精简 System Prompt。
+     * 无工具调用能力，仅作为专利领域知识对话助手，引导用户使用前端功能。
+     */
+    private static final String SYSTEM_PROMPT_NO_TOOLS = """
+            你是「PatentMind」（专利智能顾问）——部署在企业专利知识库上的专业AI对话助手。
+            
+            重要说明：当前运行模式为本地离线模型，暂不支持自动检索工具调用。
+            你只能基于用户提供的信息进行分析和解答，无法直接查询数据库。
+            
+            你的职责：
+            1. 解答用户关于专利相关的通用问题（专利法律、技术分析、IPC分类解读等）
+            2. 根据用户描述提供专利撰写、检索策略方面的专业建议
+            3. 当用户需要检索专利时，引导其使用前端的「专利检索」、「技术匹配」等功能模块
+            4. 分析用户描述的技术方案，提供侵权风险、新颖性等初步判断建议
+            
+            能力边界：
+            - 你无法直接查询本系统的专利数据库，需要检索时请告知用户使用页面上的检索功能
+            - 只处理与专利、知识产权相关的问题，无关问题礼貌拒绝
+            
+            回复要求：
+            1. 全程简体中文，专业、简洁、直接
+            2. 关键信息分条列出，重要词汇加粗
+            3. 如用户问题涉及具体专利数据，明确说明"需要您在前端使用检索功能查询"
+            """;
+
+    public ChatServiceImpl(DynamicLlmFactory dynamicLlmFactory,
                            SearchService searchService,
                            MatchService matchService,
                            PatentService patentService,
@@ -166,6 +192,7 @@ public class ChatServiceImpl implements ChatService {
                            MongoChatMemoryRepository mongoChatMemoryRepository,
                            ChatSessionRepository sessionRepository,
                            ChatMessageRepository messageRepository) {
+        this.dynamicLlmFactory = dynamicLlmFactory;
         this.searchService = searchService;
         this.matchService = matchService;
         this.patentService = patentService;
@@ -176,21 +203,42 @@ public class ChatServiceImpl implements ChatService {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
 
-        // 使用 MongoDB 实现的 ChatMemoryRepository 创建会话记忆
+        // 使用 MongoDB 实现的 ChatMemoryRepository 创建全局会话记忆（按 sessionId 隔离）
         this.chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(mongoChatMemoryRepository)
                 .maxMessages(20)
                 .build();
 
-        // 创建 ChatClient，注册工具函数和记忆advisor
-        // 使用 chatChatModel（对话专用：在线=qwen-max，离线=deepseek-r1:7b）
-        this.chatClient = ChatClient.builder(chatModel)
-                .defaultSystem(SYSTEM_PROMPT)
-                .defaultTools(this)  // 注册当前类中的 @Tool 方法
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .build();
+        log.info("对话式检索服务初始化完成（动态 LLM 路由已启用，MongoDB 持久化已启用）");
+    }
 
-        log.info("对话式检索服务初始化完成（使用 chatChatModel 对话专用模型，MongoDB 持久化已启用）");
+    /**
+     * 为当前用户构建 ChatClient（每次请求调用，底层 ChatModel 由工厂缓存复用）
+     * <p>
+     * ChatClient.build() 是轻量操作（仅组装配置），底层 ChatModel 按 configId 缓存，不重复创建。
+     *
+     * @param userId 当前登录用户 ID
+     * @return 携带系统提示词、工具函数和记忆 advisor 的 ChatClient
+     */
+    private ChatClient buildChatClient(Long userId) {
+        ChatModel model = dynamicLlmFactory.getChatModel(userId);
+        boolean toolsSupported = dynamicLlmFactory.supportsTools(userId);
+
+        if (toolsSupported) {
+            log.debug("构建 ChatClient（含工具调用）: userId={}", userId);
+            return ChatClient.builder(model)
+                    .defaultSystem(SYSTEM_PROMPT)
+                    .defaultTools(this)
+                    .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                    .build();
+        } else {
+            // 当前模型不支持 Function Calling（如 deepseek-r1:7b），使用降级纯对话模式
+            log.info("当前模型不支持 Function Calling，使用降级对话模式（不注册工具）: userId={}", userId);
+            return ChatClient.builder(model)
+                    .defaultSystem(SYSTEM_PROMPT_NO_TOOLS)
+                    .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                    .build();
+        }
     }
 
     @Override
@@ -213,9 +261,9 @@ public class ChatServiceImpl implements ChatService {
             log.info("处理对话消息: sessionId={}, userId={}, message={}", sessionId, userId, dto.getMessage());
 
             final String conversationId = sessionId;
-            
-            // 构建带记忆的ChatClient请求，使用会话ID隔离上下文
-            String response = chatClient.prompt()
+
+            // 按当前用户动态获取 ChatClient（底层 ChatModel 由工厂缓存，build 为轻量操作）
+            String response = buildChatClient(userId).prompt()
                     .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
                     .user(dto.getMessage())
                     .call()
@@ -285,18 +333,19 @@ public class ChatServiceImpl implements ChatService {
         // 使用非流式 .call() 执行（含 Function Calling），规避通义千问流式 Function Calling toolName 为空的 bug
         Flux<String> mainFlux = Mono.fromCallable(() -> {
                     MongoChatMemoryRepository.setCurrentUserId(userId);
-                    try {
-                        String response = chatClient.prompt()
-                                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
-                                .user(dto.getMessage())
-                                .call()
-                                .content();
-                        log.info("流式对话(非流式执行)完成: sessionId={}, 响应长度={}", conversationId,
-                                response != null ? response.length() : 0);
-                        return response != null ? response : "";
-                    } finally {
-                        MongoChatMemoryRepository.clearCurrentUserId();
-                    }
+                        try {
+                            // 按当前用户动态获取 ChatClient
+                            String response = buildChatClient(userId).prompt()
+                                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
+                                    .user(dto.getMessage())
+                                    .call()
+                                    .content();
+                            log.info("流式对话(非流式执行)完成: sessionId={}, 响应长度={}", conversationId,
+                                    response != null ? response.length() : 0);
+                            return response != null ? response : "";
+                        } finally {
+                            MongoChatMemoryRepository.clearCurrentUserId();
+                        }
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMapMany(fullText -> {
@@ -391,18 +440,19 @@ public class ChatServiceImpl implements ChatService {
         // 使用非流式 .call() 执行（含 Function Calling），规避通义千问流式 Function Calling toolName 为空的 bug
         Flux<ServerSentEvent<String>> mainFlux = Mono.fromCallable(() -> {
                     MongoChatMemoryRepository.setCurrentUserId(userId);
-                    try {
-                        String response = chatClient.prompt()
-                                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
-                                .user(dto.getMessage())
-                                .call()
-                                .content();
-                        log.info("SSE流式对话(非流式执行)完成: sessionId={}, 响应长度={}", conversationId,
-                                response != null ? response.length() : 0);
-                        return response != null ? response : "";
-                    } finally {
-                        MongoChatMemoryRepository.clearCurrentUserId();
-                    }
+                        try {
+                            // 按当前用户动态获取 ChatClient
+                            String response = buildChatClient(userId).prompt()
+                                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
+                                    .user(dto.getMessage())
+                                    .call()
+                                    .content();
+                            log.info("SSE流式对话(非流式执行)完成: sessionId={}, 响应长度={}", conversationId,
+                                    response != null ? response.length() : 0);
+                            return response != null ? response : "";
+                        } finally {
+                            MongoChatMemoryRepository.clearCurrentUserId();
+                        }
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMapMany(fullText -> {

@@ -138,34 +138,42 @@ public class LlmConfigController {
 
     /**
      * 管理员接口：获取系统级配置列表（user_id=0）
+     * 仅管理员可调用，权限在方法入口统一校验
      */
     @GetMapping("/system/list")
     @Operation(summary = "获取系统级配置列表", description = "仅管理员可用，获取 user_id=0 的系统默认配置")
     public Result<List<LlmConfigVO>> listSystemConfigs() {
+        Long userId = StpUtil.getLoginIdAsLong();
+        if (!isCurrentUserAdmin(userId)) {
+            return Result.forbidden("无权访问系统级配置");
+        }
         return Result.success(llmConfigService.listConfigs(0L));
     }
 
     /**
      * 管理员接口：激活系统级配置
+     * 仅管理员可调用，权限在方法入口统一校验
      */
     @PutMapping("/system/{configId}/activate")
     @Operation(summary = "激活系统级配置", description = "仅管理员可用，设置系统默认 LLM 配置")
     public Result<Void> activateSystemConfig(@PathVariable Long configId) {
         Long userId = StpUtil.getLoginIdAsLong();
-        boolean isAdmin = isCurrentUserAdmin(userId);
-        llmConfigService.activateConfig(userId, isAdmin, configId);
+        if (!isCurrentUserAdmin(userId)) {
+            return Result.forbidden("无权激活系统级配置");
+        }
+        llmConfigService.activateConfig(userId, true, configId);
         return Result.success();
     }
 
     /**
      * 管理员接口：保存/更新系统级配置
+     * 仅管理员可调用，权限在方法入口统一校验
      */
     @PostMapping("/system/save")
     @Operation(summary = "保存系统级配置", description = "仅管理员可用，新增或更新 user_id=0 的系统默认配置")
     public Result<LlmConfigVO> saveSystemConfig(@Valid @RequestBody LlmConfigDTO dto) {
         Long userId = StpUtil.getLoginIdAsLong();
-        boolean isAdmin = isCurrentUserAdmin(userId);
-        if (!isAdmin) {
+        if (!isCurrentUserAdmin(userId)) {
             return Result.forbidden("无权操作系统配置");
         }
         // 强制标记为系统配置
@@ -175,13 +183,13 @@ public class LlmConfigController {
 
     /**
      * 管理员接口：删除系统级配置
+     * 仅管理员可调用，权限在方法入口统一校验
      */
     @DeleteMapping("/system/{configId}")
     @Operation(summary = "删除系统级配置", description = "仅管理员可用，删除 user_id=0 的系统默认配置")
     public Result<Void> deleteSystemConfig(@PathVariable Long configId) {
         Long userId = StpUtil.getLoginIdAsLong();
-        boolean isAdmin = isCurrentUserAdmin(userId);
-        if (!isAdmin) {
+        if (!isCurrentUserAdmin(userId)) {
             return Result.forbidden("无权删除系统配置");
         }
         llmConfigService.deleteConfig(userId, true, configId);

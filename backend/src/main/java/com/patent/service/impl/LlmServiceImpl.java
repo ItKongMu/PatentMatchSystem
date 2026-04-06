@@ -1,8 +1,10 @@
 package com.patent.service.impl;
 
+import cn.dev33.satoken.stp.StpUtil;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.patent.config.DynamicLlmFactory;
 import com.patent.config.PatentConfig;
 import com.patent.model.entity.Patent;
 import com.patent.service.LlmService;
@@ -10,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -19,12 +20,13 @@ import java.util.List;
 /**
  * LLM服务实现
  * 支持在线模式（通义千问）和离线模式（Ollama）
+ * 通过 DynamicLlmFactory 按当前用户激活配置动态获取 ChatModel
  */
 @Slf4j
 @Service
 public class LlmServiceImpl implements LlmService {
 
-    private final ChatClient chatClient;
+    private final DynamicLlmFactory dynamicLlmFactory;
     private final PatentConfig patentConfig;
 
     /**
@@ -112,15 +114,35 @@ public class LlmServiceImpl implements LlmService {
             - 0-29：技术方案基本无关
             """;
 
-    public LlmServiceImpl(@Qualifier("llmChatModel") ChatModel chatModel,
+    public LlmServiceImpl(DynamicLlmFactory dynamicLlmFactory,
                           PatentConfig patentConfig) {
+        this.dynamicLlmFactory = dynamicLlmFactory;
         this.patentConfig = patentConfig;
-        this.chatClient = ChatClient.builder(chatModel).build();
-        log.info("LLM分析服务初始化完成，模式: {}，分析模型: {}",
-                patentConfig.getLlmMode(),
-                "offline".equals(patentConfig.getLlmMode())
-                        ? patentConfig.getOllama().getLlmModel()
-                        : patentConfig.getOnline().getLlmModel());
+        log.info("LLM分析服务初始化完成（动态 LLM 路由已启用，按用户激活配置动态选择分析模型）");
+    }
+
+    /**
+     * 获取当前请求上下文中的用户 ID（用于动态路由）
+     * 无登录上下文（如批处理任务）时返回 null，工厂将回退系统默认配置
+     */
+    private Long getCurrentUserId() {
+        try {
+            return StpUtil.getLoginIdAsLong();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 为当前用户构建分析专用 ChatClient（使用 llmModel 字段，底层 ChatModel 由工厂按 configId 缓存）
+     * <p>
+     * 离线模式下 llmModel 可与 chatModel 配置不同模型（如分析用 qwen2.5:7b，对话用 deepseek-r1:7b）。
+     */
+    private ChatClient buildChatClient() {
+        Long userId = getCurrentUserId();
+        // 分析场景使用 getLlmModel()，区别于对话场景的 getChatModel()
+        ChatModel model = dynamicLlmFactory.getLlmModel(userId);
+        return ChatClient.builder(model).build();
     }
 
     @Override
@@ -130,11 +152,11 @@ public class LlmServiceImpl implements LlmService {
         
         try {
             String prompt = String.format(ENTITY_EXTRACTION_PROMPT, truncatedText);
-            
+
             log.info("开始调用LLM进行实体提取，文本长度: {}", truncatedText.length());
             long startTime = System.currentTimeMillis();
-            
-            String response = chatClient.prompt()
+
+            String response = buildChatClient().prompt()
                     .user(prompt)
                     .call()
                     .content();
@@ -165,13 +187,13 @@ public class LlmServiceImpl implements LlmService {
     @Override
     public MatchScoreResult evaluateMatch(String query, String queryEntities, Patent candidatePatent) {
         try {
-            String prompt = String.format(MATCH_EVALUATION_PROMPT, 
-                    query, 
+            String prompt = String.format(MATCH_EVALUATION_PROMPT,
+                    query,
                     queryEntities,
                     candidatePatent.getTitle(),
                     candidatePatent.getPatentAbstract());
-            
-            String response = chatClient.prompt()
+
+            String response = buildChatClient().prompt()
                     .user(prompt)
                     .call()
                     .content();

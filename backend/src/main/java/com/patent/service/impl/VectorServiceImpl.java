@@ -7,6 +7,7 @@ import com.patent.model.entity.PatentEntity;
 import com.patent.service.VectorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingProperties;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -20,7 +21,13 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Qdrant向量服务实现
+ * Qdrant 向量服务实现
+ * <p>
+ * VectorStore（Qdrant）使用 {@code primaryEmbeddingModel} Bean（由 {@link com.patent.config.LlmConfig} 从
+ * application.yml 初始化）。向量存储和检索的实际 embedding 操作由 Spring AI 自动完成，此处无需手动调用 EmbeddingModel。
+ * <p>
+ * 向量嵌入模型固定使用 OpenAiEmbeddingModel，由 spring.ai.openai.embedding.options.model 统一配置，
+ * 不受用户动态配置影响，保证 Qdrant 全局向量维度一致性。
  */
 @Slf4j
 @Service
@@ -29,6 +36,7 @@ public class VectorServiceImpl implements VectorService {
 
     private final VectorStore vectorStore;
     private final PatentConfig patentConfig;
+    private final OpenAiEmbeddingProperties openAiEmbeddingProperties;
 
     @Override
     public String storePatentVector(Patent patent, List<PatentEntity> entities, List<PatentDomain> domains) {
@@ -199,14 +207,12 @@ public class VectorServiceImpl implements VectorService {
     }
 
     /**
-     * 获取当前使用的嵌入模型名称
-     * 离线模式：bge-m3（1024维）/ 在线模式：text-embedding-v3（1024维）
-     * 两者维度相同，可无缝切换，无需重建 Qdrant Collection
+     * 获取当前系统使用的嵌入模型名称（用于记录向量元数据）
+     * <p>
+     * 固定从 spring.ai.openai.embedding.options.model 读取，
+     * 与 primaryEmbeddingModel Bean（OpenAiEmbeddingModel）来源完全一致。
      */
     private String getEmbeddingModelName() {
-        if ("offline".equals(patentConfig.getLlmMode())) {
-            return patentConfig.getOllama().getEmbedModel();
-        }
-        return patentConfig.getOnline().getEmbedModel();
+        return openAiEmbeddingProperties.getOptions().getModel();
     }
 }

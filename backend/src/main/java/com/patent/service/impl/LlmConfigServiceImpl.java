@@ -2,6 +2,7 @@ package com.patent.service.impl;
 
 import com.patent.common.exception.BusinessException;
 import com.patent.common.util.AesUtil;
+import com.patent.config.DynamicLlmFactory;
 import com.patent.config.PatentConfig;
 import com.patent.mapper.LlmConfigMapper;
 import com.patent.model.dto.LlmConfigDTO;
@@ -10,6 +11,7 @@ import com.patent.model.vo.LlmConfigVO;
 import com.patent.service.LlmConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingProperties;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.ollama.api.OllamaApi;
@@ -38,6 +40,8 @@ public class LlmConfigServiceImpl implements LlmConfigService {
     private final LlmConfigMapper llmConfigMapper;
     private final PatentConfig patentConfig;
     private final AesUtil aesUtil;
+    private final DynamicLlmFactory dynamicLlmFactory;
+    private final OpenAiEmbeddingProperties openAiEmbeddingProperties;
 
     // API Key 脱敏：只保留前4位和后4位
     private static final int KEY_MASK_KEEP = 4;
@@ -71,10 +75,11 @@ public class LlmConfigServiceImpl implements LlmConfigService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LlmConfigVO saveConfig(Long userId, boolean isAdmin, LlmConfigDTO dto) {
-        validateConfig(dto);
+        boolean isNew = (dto.getId() == null);
+        validateConfig(dto, isNew);
 
         SysLlmConfig config;
-        if (dto.getId() != null) {
+        if (!isNew) {
             // 更新操作
             config = llmConfigMapper.selectById(dto.getId());
             if (config == null || config.getDeleted() == 1) {
@@ -103,12 +108,12 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         }
 
         // 填充字段（API Key 为空时保留原值）
+        // 注意：embedModel 已从数据库移除，向量模型由 application.yml 统一配置
         config.setConfigName(dto.getConfigName());
         config.setLlmMode(dto.getLlmMode());
         config.setBaseUrl(dto.getBaseUrl());
         config.setChatModel(dto.getChatModel());
         config.setLlmModel(dto.getLlmModel());
-        config.setEmbedModel(dto.getEmbedModel());
         config.setOllamaUrl(dto.getOllamaUrl());
         config.setRemark(dto.getRemark());
         config.setUpdatedAt(LocalDateTime.now());
@@ -120,6 +125,8 @@ public class LlmConfigServiceImpl implements LlmConfigService {
 
         if (dto.getId() != null) {
             llmConfigMapper.updateById(config);
+            // 配置修改后清除该 configId 的模型缓存，下次请求时重新构建
+            dynamicLlmFactory.invalidate(config.getId());
         } else {
             llmConfigMapper.insert(config);
         }
@@ -148,6 +155,8 @@ public class LlmConfigServiceImpl implements LlmConfigService {
             config.setIsActive(1);
             config.setUpdatedAt(LocalDateTime.now());
             llmConfigMapper.updateById(config);
+            // 系统默认变更，清空所有缓存（新的系统默认将在下次请求时按需构建）
+            dynamicLlmFactory.invalidateAll();
         }
         // 所有用户（包括管理员）都记录自己的个人选择到 user_llm_selection
         llmConfigMapper.upsertUserSelection(userId, configId);
@@ -170,17 +179,37 @@ public class LlmConfigServiceImpl implements LlmConfigService {
         if (!isAdmin && !config.getUserId().equals(userId)) {
             throw new BusinessException("无权删除此配置");
         }
-        // 检查是否为当前用户的激活配置（通过 user_llm_selection 表）
+        // 检查是否为当前操作者自己的激活配置
         Long selectedConfigId = llmConfigMapper.findSelectedConfigId(userId);
         if (configId.equals(selectedConfigId)) {
             throw new BusinessException("当前启用的配置不能删除，请先切换到其他配置");
         }
 
+        // 问题5修复：检查是否有其他用户正在使用该配置
+        // 用户自定义配置（userId > 0）本身只归属一人，无需此检查；
+        // 系统级配置（userId = 0）可能被多个用户选中，删除前需提示或清理引用。
+        if (config.getUserId() == 0L) {
+            int referenceCount = llmConfigMapper.countUsersUsingConfig(configId);
+            if (referenceCount > 0) {
+                if (!isAdmin) {
+                    // 普通用户不应能删除系统配置（上方已拦截），此处为双重保险
+                    throw new BusinessException("系统默认配置不允许删除");
+                }
+                // 管理员删除系统配置时，清除所有用户对该配置的选择引用，
+                // 这些用户下次请求时将自动回退到新的系统默认配置
+                llmConfigMapper.deleteSelectionsByConfigId(configId);
+                log.warn("管理员删除系统配置 configId={}，已清除 {} 个用户的配置选择，这些用户将回退到系统默认配置",
+                        configId, referenceCount);
+            }
+        }
+
         config.setDeleted(1);
         config.setUpdatedAt(LocalDateTime.now());
         llmConfigMapper.updateById(config);
+        // 删除配置后清除对应缓存（含对话模型和分析模型两个 key）
+        dynamicLlmFactory.invalidate(configId);
 
-        log.info("删除 LLM 配置: userId={}, configId={}", userId, configId);
+        log.info("删除 LLM 配置成功: userId={}, configId={}, configName={}", userId, configId, config.getConfigName());
     }
 
     @Override
@@ -197,9 +226,10 @@ public class LlmConfigServiceImpl implements LlmConfigService {
                 String ollamaUrl = StringUtils.hasText(dto.getOllamaUrl())
                         ? dto.getOllamaUrl()
                         : "http://localhost:11434";
-                String chatModel = StringUtils.hasText(dto.getChatModel())
-                        ? dto.getChatModel()
-                        : patentConfig.getOllama().getChatModel();
+                if (!StringUtils.hasText(dto.getChatModel())) {
+                    throw new BusinessException("请填写要测试的对话模型名称");
+                }
+                String chatModel = dto.getChatModel();
 
                 // 使用 Spring AI 官方推荐的 Builder 模式（Context7 验证）
                 OllamaApi ollamaApi = OllamaApi.builder()
@@ -221,20 +251,18 @@ public class LlmConfigServiceImpl implements LlmConfigService {
                         .content();
 
             } else {
-                // 测试在线 API 连接
+                // 测试在线 API 连接（apiKey 来自前端明文输入，无需解密）
                 String baseUrl = StringUtils.hasText(dto.getBaseUrl())
                         ? dto.getBaseUrl()
-                        : patentConfig.getOnline().getBaseUrl();
-                // 测试连接时 apiKey 来自前端明文输入，无需解密
-                String apiKey = StringUtils.hasText(dto.getApiKey())
-                        ? dto.getApiKey()
-                        : patentConfig.getOnline().getApiKey();
-                String chatModel = StringUtils.hasText(dto.getChatModel())
-                        ? dto.getChatModel()
-                        : patentConfig.getOnline().getChatModel();
+                        : "https://dashscope.aliyuncs.com/compatible-mode";
+                String apiKey = dto.getApiKey();
+                String chatModel = dto.getChatModel();
 
                 if (!StringUtils.hasText(apiKey)) {
                     throw new BusinessException("在线模式需要提供 API Key");
+                }
+                if (!StringUtils.hasText(chatModel)) {
+                    throw new BusinessException("请填写要测试的对话模型名称");
                 }
 
                 OpenAiApi openAiApi = OpenAiApi.builder()
@@ -278,23 +306,31 @@ public class LlmConfigServiceImpl implements LlmConfigService {
     @Override
     public Map<String, Object> getSystemStatus() {
         Map<String, Object> status = new HashMap<>();
-        String mode = patentConfig.getLlmMode();
+        // 优先从数据库系统默认配置读取
+        com.patent.model.entity.SysLlmConfig sysConfig = llmConfigMapper.findSystemDefault();
+        String mode = sysConfig != null ? sysConfig.getLlmMode() : patentConfig.getLlmMode();
         status.put("currentMode", mode);
-        status.put("vectorDimension", patentConfig.getVectorDimension());
+        status.put("vectorDimension", openAiEmbeddingProperties.getOptions().getDimensions());
+        status.put("configSource", sysConfig != null ? "database" : "none");
 
-        if ("offline".equals(mode)) {
-            status.put("chatModel", patentConfig.getOllama().getChatModel());
-            status.put("llmModel", patentConfig.getOllama().getLlmModel());
-            status.put("embedModel", patentConfig.getOllama().getEmbedModel());
-            status.put("description", "离线模式 - Ollama 本地推理");
+        if (sysConfig != null) {
+            if ("offline".equals(mode)) {
+                status.put("chatModel", sysConfig.getChatModel());
+                status.put("llmModel", sysConfig.getLlmModel());
+                status.put("ollamaUrl", sysConfig.getOllamaUrl());
+                status.put("description", "离线模式 - Ollama 本地推理");
+            } else {
+                status.put("baseUrl", sysConfig.getBaseUrl());
+                status.put("chatModel", sysConfig.getChatModel());
+                status.put("llmModel", sysConfig.getLlmModel());
+                status.put("hasApiKey", StringUtils.hasText(sysConfig.getApiKey()));
+                status.put("description", "在线模式 - OpenAI 兼容 API");
+            }
         } else {
-            status.put("baseUrl", patentConfig.getOnline().getBaseUrl());
-            status.put("chatModel", patentConfig.getOnline().getChatModel());
-            status.put("llmModel", patentConfig.getOnline().getLlmModel());
-            status.put("embedModel", patentConfig.getOnline().getEmbedModel());
-            status.put("hasApiKey", StringUtils.hasText(patentConfig.getOnline().getApiKey()));
-            status.put("description", "在线模式 - OpenAI 兼容 API");
+            status.put("description", "未配置系统默认 LLM，请管理员在「系统设置 → LLM配置」中添加并激活配置");
         }
+        // 向量嵌入模型固定从 spring.ai.openai.embedding.options.model 读取（与 primaryEmbeddingModel Bean 来源一致）
+        status.put("embedModel", openAiEmbeddingProperties.getOptions().getModel());
 
         return status;
     }
@@ -334,7 +370,6 @@ public class LlmConfigServiceImpl implements LlmConfigService {
                 .hasApiKey(StringUtils.hasText(config.getApiKey()))
                 .chatModel(config.getChatModel())
                 .llmModel(config.getLlmModel())
-                .embedModel(config.getEmbedModel())
                 .ollamaUrl(config.getOllamaUrl())
                 .isActive(activeConfigId != null && activeConfigId.equals(config.getId()))
                 .isSystemConfig(config.getUserId() == 0L)
@@ -362,8 +397,19 @@ public class LlmConfigServiceImpl implements LlmConfigService {
 
     /**
      * 配置校验
+     *
+     * @param dto     配置 DTO
+     * @param isNew   true=新增场景，false=更新场景
+     *                新增时 online 模式必须提供 apiKey；更新时 apiKey 为 null 表示保留原值不修改。
      */
-    private void validateConfig(LlmConfigDTO dto) {
+    private void validateConfig(LlmConfigDTO dto, boolean isNew) {
+        if (!StringUtils.hasText(dto.getConfigName())) {
+            throw new BusinessException("配置名称不能为空");
+        }
+        if (!StringUtils.hasText(dto.getLlmMode())
+                || (!"online".equals(dto.getLlmMode()) && !"offline".equals(dto.getLlmMode()))) {
+            throw new BusinessException("LLM 模式必须为 online 或 offline");
+        }
         if ("online".equals(dto.getLlmMode())) {
             if (!StringUtils.hasText(dto.getBaseUrl())) {
                 throw new BusinessException("在线模式需要填写 API BaseURL");
@@ -371,9 +417,14 @@ public class LlmConfigServiceImpl implements LlmConfigService {
             if (!StringUtils.hasText(dto.getChatModel())) {
                 throw new BusinessException("在线模式需要填写对话模型名称");
             }
-        } else if ("offline".equals(dto.getLlmMode())) {
+            // 新增时 apiKey 必须提供；更新时 null 表示沿用原值，空字符串表示主动清空
+            if (isNew && !StringUtils.hasText(dto.getApiKey())) {
+                throw new BusinessException("在线模式新增配置时必须提供 API Key");
+            }
+        } else {
+            // offline
             if (!StringUtils.hasText(dto.getChatModel()) && !StringUtils.hasText(dto.getLlmModel())) {
-                throw new BusinessException("离线模式至少需要填写一个模型名称");
+                throw new BusinessException("离线模式至少需要填写一个模型名称（对话模型或分析模型）");
             }
         }
     }

@@ -42,10 +42,6 @@
               <span class="banner-model-label">分析</span>
               <code>{{ activeConfig.llmModel }}</code>
             </span>
-            <span v-if="activeConfig.embedModel" class="banner-model-item">
-              <span class="banner-model-label">向量</span>
-              <code>{{ activeConfig.embedModel }}</code>
-            </span>
           </div>
         </div>
       </div>
@@ -116,7 +112,6 @@
                 <div class="model-tags-cell">
                   <el-tag v-if="row.chatModel" size="small" effect="plain" type="primary">对话: {{ row.chatModel }}</el-tag>
                   <el-tag v-if="row.llmModel" size="small" effect="plain" type="success">分析: {{ row.llmModel }}</el-tag>
-                  <el-tag v-if="row.embedModel" size="small" effect="plain" type="info">向量: {{ row.embedModel }}</el-tag>
                 </div>
               </template>
             </el-table-column>
@@ -226,7 +221,6 @@
                 <div class="model-tags-cell">
                   <el-tag v-if="row.chatModel" size="small" effect="plain" type="primary">对话: {{ row.chatModel }}</el-tag>
                   <el-tag v-if="row.llmModel" size="small" effect="plain" type="success">分析: {{ row.llmModel }}</el-tag>
-                  <el-tag v-if="row.embedModel" size="small" effect="plain" type="info">向量: {{ row.embedModel }}</el-tag>
                 </div>
               </template>
             </el-table-column>
@@ -323,11 +317,6 @@
               <el-option v-for="m in ollamaLlmModels" :key="m" :label="m" :value="m" />
             </el-select>
           </el-form-item>
-          <el-form-item label="向量模型">
-            <el-select v-model="form.embedModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
-              <el-option v-for="m in ollamaEmbedModels" :key="m" :label="m" :value="m" />
-            </el-select>
-          </el-form-item>
         </template>
 
         <!-- 在线模式字段 -->
@@ -336,7 +325,7 @@
           <el-form-item label="API BaseURL" prop="baseUrl">
             <el-input v-model="form.baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" />
           </el-form-item>
-          <el-form-item label="API Key">
+          <el-form-item label="API Key" prop="apiKey">
             <el-input
               v-model="form.apiKey"
               type="password"
@@ -360,11 +349,6 @@
           <el-form-item label="分析模型">
             <el-select v-model="form.llmModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
               <el-option v-for="m in onlineLlmModels" :key="m" :label="m" :value="m" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="向量模型">
-            <el-select v-model="form.embedModel" allow-create filterable placeholder="选择或输入模型名" style="width:100%">
-              <el-option v-for="m in onlineEmbedModels" :key="m" :label="m" :value="m" />
             </el-select>
           </el-form-item>
         </template>
@@ -497,7 +481,6 @@ const defaultForm = {
   llmMode: 'offline',
   chatModel: '',
   llmModel: '',
-  embedModel: '',
   ollamaUrl: 'http://localhost:11434',
   baseUrl: '',
   apiKey: '',
@@ -512,16 +495,18 @@ const formRules = computed(() => ({
   chatModel: [{ required: true, message: '请填写对话模型名称', trigger: 'blur' }],
   baseUrl: form.llmMode === 'online'
     ? [{ required: true, message: '在线模式需填写 API BaseURL', trigger: 'blur' }]
+    : [],
+  // 新增配置时（id 为空）在线模式必须提供 API Key；编辑时留空表示沿用原有 Key
+  apiKey: form.llmMode === 'online' && !form.id
+    ? [{ required: true, message: '新增在线配置时必须填写 API Key', trigger: 'blur' }]
     : []
 }))
 
 // ==================== 常量数据 ====================
 const ollamaChatModels = ['deepseek-r1:7b', 'deepseek-r1:14b', 'qwen2.5:7b', 'qwen2.5:14b', 'llama3.2:3b']
 const ollamaLlmModels = ['qwen2.5:7b', 'qwen2.5:3b', 'deepseek-r1:7b', 'llama3.2:3b']
-const ollamaEmbedModels = ['bge-m3', 'nomic-embed-text', 'mxbai-embed-large']
 const onlineChatModels = ['qwen-max', 'qwen-plus', 'qwen-turbo', 'deepseek-chat', 'deepseek-reasoner', 'gpt-4o', 'gpt-4o-mini']
 const onlineLlmModels = ['qwen-plus', 'qwen-turbo', 'deepseek-chat', 'gpt-4o-mini']
-const onlineEmbedModels = ['text-embedding-v3', 'text-embedding-v2', 'text-embedding-ada-002']
 
 // ==================== 方法 ====================
 const loadData = async () => {
@@ -560,7 +545,6 @@ const openEditDialog = (config) => {
     llmMode: config.llmMode || 'offline',
     chatModel: config.chatModel || '',
     llmModel: config.llmModel || '',
-    embedModel: config.embedModel || '',
     ollamaUrl: config.ollamaUrl || 'http://localhost:11434',
     baseUrl: config.baseUrl || '',
     apiKey: '',   // 不回填 apiKey，留空表示不修改

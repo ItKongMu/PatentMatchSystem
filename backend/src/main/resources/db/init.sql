@@ -215,7 +215,6 @@ CREATE TABLE sys_llm_config
     api_key     VARCHAR(512)          COMMENT '加密存储的 API Key（在线模式）',
     chat_model  VARCHAR(128)          COMMENT '对话模型名称（ChatService使用）',
     llm_model   VARCHAR(128)          COMMENT '分析模型名称（LlmService使用）',
-    embed_model VARCHAR(128)          COMMENT '向量嵌入模型名称（VectorService使用）',
     ollama_url  VARCHAR(256)          COMMENT 'Ollama 服务地址（离线模式）',
     is_active   TINYINT      NOT NULL DEFAULT 0 COMMENT '系统配置全局默认标记（0=非默认，1=系统默认）；用户激活状态通过 user_llm_selection 表管理',
     remark      VARCHAR(256)          COMMENT '备注说明',

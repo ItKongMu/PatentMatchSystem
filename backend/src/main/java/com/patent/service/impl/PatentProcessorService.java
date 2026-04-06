@@ -11,6 +11,7 @@ import com.patent.service.StatsService;
 import com.patent.service.VectorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingProperties;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
@@ -48,6 +49,7 @@ public class PatentProcessorService {
     private final StatsService statsService;
     private final PatentConfig patentConfig;
     private final GraphService graphService;
+    private final OpenAiEmbeddingProperties openAiEmbeddingProperties;
 
     /**
      * 异步处理专利
@@ -234,9 +236,8 @@ public class PatentProcessorService {
             }
             Map<Long, String> vectorIdMap = vectorService.batchStorePatentVectors(vectorDataBatch);
 
-            // 保存向量映射记录
-            String embeddingModel = "online".equals(patentConfig.getLlmMode())
-                    ? "text-embedding-v3" : "nomic-embed-text";
+            // 保存向量映射记录（embedding 模型固定从 spring.ai.openai.embedding.options.model 读取）
+            String embeddingModel = openAiEmbeddingProperties.getOptions().getModel();
 
             for (VectorService.PatentVectorData data : vectorDataBatch) {
                 Long patentId = data.patent().getId();
@@ -254,7 +255,7 @@ public class PatentProcessorService {
                     pv.setPatentId(patentId);
                     pv.setVectorId(vectorId);
                     pv.setEmbeddingModel(embeddingModel);
-                    pv.setVectorDim(patentConfig.getVectorDimension());
+                    pv.setVectorDim(openAiEmbeddingProperties.getOptions().getDimensions());
                     patentVectorMapper.insert(pv);
                     patentMapper.updateParseStatus(patentId, "SUCCESS", null);
                 } else {
@@ -736,11 +737,10 @@ public class PatentProcessorService {
         PatentVector pv = new PatentVector();
         pv.setPatentId(patentId);
         pv.setVectorId(vectorId);
-        // 根据LLM模式设置embedding模型名称
-        String embeddingModel = "online".equals(patentConfig.getLlmMode())
-                ? "text-embedding-v3" : "nomic-embed-text";
+        // embedding 模型固定从 spring.ai.openai.embedding.options.model 读取
+        String embeddingModel = openAiEmbeddingProperties.getOptions().getModel();
         pv.setEmbeddingModel(embeddingModel);
-        pv.setVectorDim(patentConfig.getVectorDimension());
+        pv.setVectorDim(openAiEmbeddingProperties.getOptions().getDimensions());
         patentVectorMapper.insert(pv);
 
         log.info("向量存储完成: {}, vectorId: {}", patentId, vectorId);

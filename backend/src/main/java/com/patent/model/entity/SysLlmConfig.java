@@ -56,11 +56,6 @@ public class SysLlmConfig {
     private String llmModel;
 
     /**
-     * 向量嵌入模型名称（VectorService 使用）
-     */
-    private String embedModel;
-
-    /**
      * Ollama 服务地址（离线模式使用）
      */
     private String ollamaUrl;

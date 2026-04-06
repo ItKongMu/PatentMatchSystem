@@ -42,9 +42,6 @@ public class LlmConfigVO {
     @Schema(description = "分析模型名称")
     private String llmModel;
 
-    @Schema(description = "向量嵌入模型名称")
-    private String embedModel;
-
     @Schema(description = "Ollama服务地址")
     private String ollamaUrl;
 

@@ -37,9 +37,6 @@ public class LlmConfigDTO {
     @Schema(description = "分析模型名称（LlmService使用）", example = "qwen-plus")
     private String llmModel;
 
-    @Schema(description = "向量嵌入模型名称（VectorService使用）", example = "text-embedding-v3")
-    private String embedModel;
-
     @Schema(description = "Ollama服务地址（离线模式使用）", example = "http://localhost:11434")
     private String ollamaUrl;
 

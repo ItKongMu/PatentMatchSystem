@@ -41,6 +41,19 @@ public interface LlmConfigMapper extends BaseMapper<SysLlmConfig> {
     Long findSelectedConfigId(@Param("userId") Long userId);
 
     /**
+     * 查询有多少个用户（user_id > 0）在 user_llm_selection 中选择了指定配置
+     * 用于删除前检查：若有其他用户正在使用该配置则不允许直接删除
+     */
+    @Select("SELECT COUNT(*) FROM user_llm_selection WHERE config_id = #{configId}")
+    int countUsersUsingConfig(@Param("configId") Long configId);
+
+    /**
+     * 删除所有指向指定配置的用户选择记录（管理员强制删除系统配置时使用）
+     */
+    @Delete("DELETE FROM user_llm_selection WHERE config_id = #{configId}")
+    void deleteSelectionsByConfigId(@Param("configId") Long configId);
+
+    /**
      * 保存或更新用户的配置选择（UPSERT）
      */
     @Insert("INSERT INTO user_llm_selection (user_id, config_id) VALUES (#{userId}, #{configId}) " +
