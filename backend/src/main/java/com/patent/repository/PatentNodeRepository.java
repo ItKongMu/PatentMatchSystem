@@ -44,8 +44,33 @@ public interface PatentNodeRepository extends Neo4jRepository<PatentNode, String
     int countThreeHopRelatedPatents(@Param("pubNo") String pubNo);
 
     /**
-     * 删除专利节点及其所有关系
+     * 删除专利节点及其所有关系，并同步清理孤儿节点。
+     *
+     * <p>策略说明：
+     * <ul>
+     *   <li>先收集与该专利关联的 Entity / Applicant 候选节点</li>
+     *   <li>使用 DETACH DELETE 删除专利节点及其所有关联关系（MENTIONS / HAS_IPC / FILED_BY）</li>
+     *   <li>删除后检查候选节点是否已成为孤儿节点（无任何剩余关系），若是则一并删除</li>
+     *   <li>IPC 节点属于共享分类体系（可能被多个专利引用，也可能有层级关系），保留不删除</li>
+     * </ul>
      */
-    @Query("MATCH (p:Patent {publicationNo: $pubNo}) DETACH DELETE p")
+    @Query("MATCH (p:Patent {publicationNo: $pubNo}) " +
+           "OPTIONAL MATCH (p)-[:MENTIONS]->(e:Entity) " +
+           "OPTIONAL MATCH (p)-[:FILED_BY]->(a:Applicant) " +
+           "WITH p, collect(DISTINCT e) AS entityCandidates, collect(DISTINCT a) AS applicantCandidates " +
+           "DETACH DELETE p " +
+           "WITH entityCandidates, applicantCandidates " +
+           "CALL { " +
+           "  WITH entityCandidates " +
+           "  UNWIND entityCandidates AS e " +
+           "  WITH e WHERE e IS NOT NULL AND NOT (e)--() " +
+           "  DELETE e " +
+           "} " +
+           "CALL { " +
+           "  WITH applicantCandidates " +
+           "  UNWIND applicantCandidates AS a " +
+           "  WITH a WHERE a IS NOT NULL AND NOT (a)--() " +
+           "  DELETE a " +
+           "}")
     void deleteByPublicationNo(@Param("pubNo") String pubNo);
 }

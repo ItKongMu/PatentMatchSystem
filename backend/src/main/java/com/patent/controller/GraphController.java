@@ -1,4 +1,4 @@
-package com.patent.controller;
+npackage com.patent.controller;
 
 import com.patent.common.Result;
 import com.patent.model.dto.GraphQueryDTO;
@@ -9,12 +9,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.nio.charset.StandardCharsets;
 
 /**
  * 知识图谱 Controller
@@ -73,77 +68,4 @@ public class GraphController {
         return Result.success(vo);
     }
 
-    /**
-     * 下载图谱 CSV 模板（管理员用于全量导入）
-     */
-    @Operation(summary = "下载 CSV 模板", description = "下载图谱 CSV 导入模板，用于 neo4j-admin 全量导入")
-    @GetMapping("/csv-template")
-    public ResponseEntity<byte[]> downloadCsvTemplate() {
-        String template = buildCsvTemplate();
-        byte[] bytes = template.getBytes(StandardCharsets.UTF_8);
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType("text/csv; charset=UTF-8"));
-        headers.setContentDispositionFormData("attachment", "graph_import_template.csv");
-        headers.setContentLength(bytes.length);
-
-        return ResponseEntity.ok()
-                .headers(headers)
-                .body(bytes);
-    }
-
-    /**
-     * 构建 CSV 模板内容
-     */
-    private String buildCsvTemplate() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("# 专利知识图谱 CSV 导入模板\n");
-        sb.append("# 使用 neo4j-admin database import full 命令导入\n\n");
-
-        sb.append("# === patent_nodes.csv ===\n");
-        sb.append("publication_no:ID(Patent),title,abstract_text,applicant,publication_date,domain_codes:string[],source_type,created_at\n");
-        sb.append("CN123456789A,一种图像识别方法,专利摘要...,华为技术有限公司,2024-05-20,G06F16/30;G06F17/00,FILE,2024-05-25T09:00:00\n\n");
-
-        sb.append("# === ipc_nodes.csv ===\n");
-        sb.append("ipc_code:ID(IPC),name,level,parent_code\n");
-        sb.append("G06F16/30,信息检索,5,G06F16\n\n");
-
-        sb.append("# === entity_nodes.csv ===\n");
-        sb.append("entity_name:ID(Entity),entity_type,alias,source\n");
-        sb.append("图像传感器,PRODUCT,图像传感元件,LLM\n\n");
-
-        sb.append("# === applicant_nodes.csv ===\n");
-        sb.append("applicant_name:ID(Applicant)\n");
-        sb.append("华为技术有限公司\n\n");
-
-        sb.append("# === has_ipc_rels.csv ===\n");
-        sb.append(":START_ID(Patent),:END_ID(IPC)\n");
-        sb.append("CN123456789A,G06F16/30\n\n");
-
-        sb.append("# === mentions_rels.csv ===\n");
-        sb.append(":START_ID(Patent),:END_ID(Entity),confidence\n");
-        sb.append("CN123456789A,图像传感器,0.91\n\n");
-
-        sb.append("# === filed_by_rels.csv ===\n");
-        sb.append(":START_ID(Patent),:END_ID(Applicant)\n");
-        sb.append("CN123456789A,华为技术有限公司\n\n");
-
-        sb.append("# === ipc_parent_rels.csv ===\n");
-        sb.append(":START_ID(IPC),:END_ID(IPC)\n");
-        sb.append("G06F16/30,G06F16\n\n");
-
-        sb.append("# === 导入命令 ===\n");
-        sb.append("# neo4j-admin database import full \\\n");
-        sb.append("#   --nodes=Patent=patent_nodes.csv \\\n");
-        sb.append("#   --nodes=IPC=ipc_nodes.csv \\\n");
-        sb.append("#   --nodes=Entity=entity_nodes.csv \\\n");
-        sb.append("#   --nodes=Applicant=applicant_nodes.csv \\\n");
-        sb.append("#   --relationships=HAS_IPC=has_ipc_rels.csv \\\n");
-        sb.append("#   --relationships=MENTIONS=mentions_rels.csv \\\n");
-        sb.append("#   --relationships=FILED_BY=filed_by_rels.csv \\\n");
-        sb.append("#   --relationships=PARENT_OF=ipc_parent_rels.csv \\\n");
-        sb.append("#   neo4j\n");
-
-        return sb.toString();
-    }
 }

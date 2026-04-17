@@ -33,6 +33,17 @@ public interface VectorService {
     List<Document> semanticSearch(String queryText, String domainFilter, int topK);
 
     /**
+     * 语义检索（专利互检专用，支持排除指定专利自身）
+     *
+     * @param queryText       查询文本
+     * @param domainFilter    领域过滤（IPC部，可选）
+     * @param topK            返回数量
+     * @param excludePatentId 排除的专利ID（专利互检时排除自身，null表示不排除）
+     * @return 相似文档列表
+     */
+    List<Document> semanticSearch(String queryText, String domainFilter, int topK, Long excludePatentId);
+
+    /**
      * 删除专利向量
      *
      * @param vectorId Qdrant向量ID

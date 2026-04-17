@@ -24,20 +24,30 @@ public class AsyncConfig implements AsyncConfigurer {
     @Bean("taskExecutor")
     public Executor getAsyncExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 核心线程数
         executor.setCorePoolSize(5);
-        // 最大线程数
         executor.setMaxPoolSize(20);
-        // 队列容量
         executor.setQueueCapacity(100);
-        // 线程名前缀
         executor.setThreadNamePrefix("patent-async-");
-        // 拒绝策略：由调用线程处理
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        // 等待任务完成后再关闭
         executor.setWaitForTasksToCompleteOnShutdown(true);
-        // 等待时间
         executor.setAwaitTerminationSeconds(60);
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * 专用于专利匹配的线程池（LLM调用耗时较长，单独隔离）
+     */
+    @Bean("matchExecutor")
+    public Executor matchExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(3);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("match-async-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(300);
         executor.initialize();
         return executor;
     }

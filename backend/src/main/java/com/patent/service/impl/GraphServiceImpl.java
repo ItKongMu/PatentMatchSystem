@@ -376,23 +376,38 @@ public class GraphServiceImpl implements GraphService {
         GraphVO vo = new GraphVO();
         if (dto == null) return vo;
 
+        String nodeType    = dto.getNodeType();
         String effectiveKey = dto.getEffectiveKey();
+        boolean hasType = StringUtils.hasText(nodeType);
+        boolean hasKey  = StringUtils.hasText(effectiveKey);
+
         // nodeType 和 key 都为空时无法查询
-        if (!StringUtils.hasText(dto.getNodeType()) && !StringUtils.hasText(effectiveKey)) {
+        if (!hasType && !hasKey) {
             return vo;
         }
 
         int depth = dto.getDepth() != null ? Math.min(dto.getDepth(), 3) : 2;
-        int limit = dto.getLimit() != null ? Math.min(dto.getLimit(), 200) : 50;
+        // 无关键词时（按类型浏览）默认 limit=25，有关键词时 limit=50
+        int defaultLimit = hasKey ? 50 : 25;
+        int limit = dto.getLimit() != null ? Math.min(dto.getLimit(), 200) : defaultLimit;
 
-        String cypher = buildGenericCypher(dto.getNodeType(), depth, limit);
-        log.info("通用图谱查询: nodeType={}, key={}, depth={}", dto.getNodeType(), effectiveKey, depth);
+        log.info("通用图谱查询: nodeType={}, key={}, depth={}, limit={}", nodeType, effectiveKey, depth, limit);
 
         try {
-            Collection<Map<String, Object>> results = neo4jClient.query(cypher)
-                    .bind(effectiveKey).to("nodeKey")
-                    .fetch()
-                    .all();
+            Collection<Map<String, Object>> results;
+
+            if (!hasKey) {
+                // ---- 浏览模式：仅按类型返回节点（不做路径遍历，避免全量扫描） ----
+                String cypher = buildBrowseCypher(nodeType, depth, limit);
+                results = neo4jClient.query(cypher).fetch().all();
+            } else {
+                // ---- 搜索模式：按关键词做路径遍历 ----
+                String cypher = buildGenericCypher(nodeType, depth, limit);
+                results = neo4jClient.query(cypher)
+                        .bind(effectiveKey).to("nodeKey")
+                        .fetch()
+                        .all();
+            }
 
             log.info("通用图谱查询结果行数: {}", results.size());
 
@@ -413,8 +428,8 @@ public class GraphServiceImpl implements GraphService {
                     }
                 }
                 if (endLabel != null && endKey != null && relType != null) {
-                    String srcId  = startLabel + ":" + startKey;
-                    String dstId  = endLabel + ":" + endKey;
+                    String srcId   = startLabel + ":" + startKey;
+                    String dstId   = endLabel   + ":" + endKey;
                     String dstName = endName != null ? endName : endKey;
                     if (!containsNode(vo.getNodes(), dstId)) {
                         vo.getNodes().add(GraphVO.NodeVO.of(endLabel, endKey, dstName));
@@ -500,7 +515,7 @@ public class GraphServiceImpl implements GraphService {
     }
 
     /**
-     * 构建通用图谱查询 Cypher
+     * 构建通用图谱查询 Cypher（有关键词时，做路径遍历）
      * nodeType 为空时匹配所有节点类型
      */
     private String buildGenericCypher(String nodeType, int depth, int limit) {
@@ -508,7 +523,7 @@ public class GraphServiceImpl implements GraphService {
         String nodeLabel = StringUtils.hasText(nodeType) ? ":" + nodeType : "";
         return String.format(
                 "MATCH path = (n%s)-[r*1..%d]-(m) " +
-                "WHERE ($nodeKey IS NULL OR n.publicationNo = $nodeKey OR n.ipcCode = $nodeKey " +
+                "WHERE (n.publicationNo = $nodeKey OR n.ipcCode = $nodeKey " +
                 "   OR n.name = $nodeKey OR n.applicantName = $nodeKey) " +
                 "WITH nodes(path) as ns, relationships(path) as rels " +
                 "UNWIND range(0, size(ns)-2) as i " +
@@ -522,6 +537,28 @@ public class GraphServiceImpl implements GraphService {
                 "       type(rel) as relType " +
                 "LIMIT %d",
                 nodeLabel, depth, limit
+        );
+    }
+
+    /**
+     * 构建浏览模式 Cypher（无关键词，仅按类型返回节点及其直接关系）
+     * 避免全量路径遍历导致性能问题
+     */
+    private String buildBrowseCypher(String nodeType, int depth, int limit) {
+        String nodeLabel = StringUtils.hasText(nodeType) ? ":" + nodeType : "";
+        // 浏览模式：先取样本节点，再展开1跳邻居，控制数量
+        return String.format(
+                "MATCH (n%s) " +
+                "WITH n LIMIT %d " +
+                "OPTIONAL MATCH (n)-[r]->(m) " +
+                "RETURN labels(n)[0] as startLabel, " +
+                "       coalesce(n.publicationNo, n.ipcCode, n.name, n.applicantName) as startKey, " +
+                "       coalesce(n.title, n.name, n.ipcCode, n.applicantName) as startName, " +
+                "       labels(m)[0] as endLabel, " +
+                "       coalesce(m.publicationNo, m.ipcCode, m.name, m.applicantName) as endKey, " +
+                "       coalesce(m.title, m.name, m.ipcCode, m.applicantName) as endName, " +
+                "       type(r) as relType",
+                nodeLabel, limit
         );
     }
 

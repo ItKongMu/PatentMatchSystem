@@ -99,6 +99,7 @@
               type="primary"
               size="large"
               :loading="matching"
+              :disabled="matching"
               @click="handleTextMatch"
             >
               <el-icon v-if="!matching">
@@ -109,7 +110,7 @@
               </el-icon>
               {{ matching ? '匹配分析中...' : '开始匹配' }}
             </el-button>
-            <el-button size="large" @click="resetTextForm">重置</el-button>
+            <el-button size="large" :disabled="matching" @click="resetTextForm">重置</el-button>
           </div>
         </el-form>
       </div>
@@ -161,6 +162,7 @@
               type="primary"
               size="large"
               :loading="matching"
+              :disabled="matching"
               @click="handlePatentMatch"
             >
               <el-icon v-if="!matching">
@@ -174,9 +176,33 @@
               </el-icon>
               {{ matching ? '匹配分析中...' : '开始匹配' }}
             </el-button>
-            <el-button size="large" @click="resetPatentForm">重置</el-button>
+            <el-button size="large" :disabled="matching" @click="resetPatentForm">重置</el-button>
           </div>
         </el-form>
+      </div>
+
+      <!-- 进度条（匹配中显示） -->
+      <div v-if="matching && taskStatus" class="matching-progress">
+        <div class="progress-header">
+          <span class="progress-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin-icon">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            </svg>
+            正在进行 LLM 精排分析，请稍候...
+          </span>
+          <span class="progress-count" v-if="taskStatus.totalCount > 0">
+            {{ taskStatus.processedCount }} / {{ taskStatus.totalCount }}
+          </span>
+        </div>
+        <el-progress
+          :percentage="taskStatus.progress || 0"
+          :stroke-width="10"
+          :color="progressColor"
+          striped
+          striped-flow
+          :duration="10"
+        />
+        <p class="progress-tip">匹配专利数量较多时，LLM 评估需要较长时间，请耐心等待</p>
       </div>
     </div>
     
@@ -190,7 +216,7 @@
         </div>
       </div>
       
-      <!-- 查询实体分析 - 增强版带匹配高亮 -->
+      <!-- 查询实体分析 -->
       <div v-if="matchResult.queryEntities?.length" class="analysis-card card">
         <div class="analysis-header">
           <h3>
@@ -234,7 +260,6 @@
           </el-tooltip>
         </div>
         
-        <!-- 匹配统计摘要 -->
         <div v-if="matchedEntityCount > 0" class="match-summary">
           <div class="summary-item">
             <span class="summary-icon">
@@ -306,9 +331,8 @@
               </div>
             </div>
             
-            <p class="result-abstract">{{ truncateText(item.abstract, 200) }}</p>
+            <p class="result-abstract">{{ truncateText(item.patentAbstract, 200) }}</p>
             
-            <!-- 匹配标签和简要原因 -->
             <div class="result-tags">
               <span 
                 class="match-tag" 
@@ -324,7 +348,7 @@
               </span>
             </div>
 
-            <!-- 详细匹配解释展开区域 -->
+            <!-- 详细匹配解释 -->
             <div class="match-explanation-section">
               <el-collapse v-model="expandedItems[item.patentId]">
                 <el-collapse-item :name="item.patentId">
@@ -340,7 +364,6 @@
                   </template>
                   
                   <div class="explanation-content">
-                    <!-- 整体分析 -->
                     <div v-if="item.explanation?.overallAnalysis" class="explanation-block">
                       <h4>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -354,7 +377,6 @@
                       <p>{{ item.explanation.overallAnalysis }}</p>
                     </div>
 
-                    <!-- 技术相似性分析 -->
                     <div v-if="item.explanation?.technicalSimilarity" class="explanation-block">
                       <h4>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -395,7 +417,6 @@
                       </div>
                     </div>
 
-                    <!-- 实体匹配详情 -->
                     <div v-if="item.matchedEntityDetails?.length" class="explanation-block">
                       <h4>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -433,7 +454,6 @@
                       </div>
                     </div>
 
-                    <!-- 创新点对比 -->
                     <div v-if="item.explanation?.innovationPoint" class="explanation-block">
                       <h4>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -444,7 +464,6 @@
                       <p>{{ item.explanation.innovationPoint }}</p>
                     </div>
 
-                    <!-- 应用场景分析 -->
                     <div v-if="item.explanation?.applicationScenario" class="explanation-block">
                       <h4>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -482,13 +501,21 @@
         </svg>
         <h3>未找到匹配的专利</h3>
         <p>尝试修改查询内容或放宽筛选条件</p>
+        <div class="empty-tips">
+          <p class="tips-title">可能的原因：</p>
+          <ul>
+            <li>向量库中专利数量较少，相似度未达到阈值</li>
+            <li>专利互检时，库中尚无其他技术相似的专利</li>
+            <li>可尝试先导入更多专利，或使用<strong>文本查询匹配</strong>模式</li>
+          </ul>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onActivated, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { matchApi } from '@/api/match'
@@ -503,7 +530,10 @@ const searchLoading = ref(false)
 const textMatchResult = ref(null)
 const patentMatchResult = ref(null)
 const patentOptions = ref([])
-const expandedItems = ref({})  // 控制详细解释展开状态
+const expandedItems = ref({})
+const taskStatus = ref(null)
+
+let pollTimer = null
 
 // 文本匹配表单
 const textFormRef = ref(null)
@@ -537,10 +567,16 @@ const matchResult = computed(() => {
   return activeTab.value === 'text' ? textMatchResult.value : patentMatchResult.value
 })
 
+const progressColor = computed(() => {
+  const p = taskStatus.value?.progress || 0
+  if (p >= 80) return '#10B981'
+  if (p >= 40) return '#3B82F6'
+  return '#F59E0B'
+})
+
 // 收集所有匹配结果中的实体匹配详情
 const allMatchedEntities = computed(() => {
   if (!matchResult.value?.matches) return new Map()
-  
   const entityMap = new Map()
   matchResult.value.matches.forEach(match => {
     if (match.matchedEntityDetails) {
@@ -555,27 +591,17 @@ const allMatchedEntities = computed(() => {
   return entityMap
 })
 
-// 已匹配实体数量
-const matchedEntityCount = computed(() => {
-  return allMatchedEntities.value.size
-})
+const matchedEntityCount = computed(() => allMatchedEntities.value.size)
 
-// 平均实体匹配度
 const avgEntitySimilarity = computed(() => {
   if (allMatchedEntities.value.size === 0) return 0
   let total = 0
-  allMatchedEntities.value.forEach(detail => {
-    total += detail.similarity || 0
-  })
+  allMatchedEntities.value.forEach(detail => { total += detail.similarity || 0 })
   return Math.round(total / allMatchedEntities.value.size)
 })
 
-// 检查实体是否被匹配
-const isEntityMatched = (entityName) => {
-  return allMatchedEntities.value.has(entityName)
-}
+const isEntityMatched = (entityName) => allMatchedEntities.value.has(entityName)
 
-// 获取实体匹配的提示信息
 const getEntityTooltip = (entityName) => {
   const detail = allMatchedEntities.value.get(entityName)
   if (!detail) return ''
@@ -593,21 +619,127 @@ const truncateText = (text, length) => {
   return text.length > length ? text.substring(0, length) + '...' : text
 }
 
-// 获取进度条颜色
 const getProgressColor = (percentage) => {
-  if (percentage >= 80) return '#10B981'  // 绿色
-  if (percentage >= 60) return '#F59E0B'  // 黄色
-  if (percentage >= 40) return '#3B82F6'  // 蓝色
-  return '#EF4444'  // 红色
+  if (percentage >= 80) return '#10B981'
+  if (percentage >= 60) return '#F59E0B'
+  if (percentage >= 40) return '#3B82F6'
+  return '#EF4444'
 }
+
+// ==================== 轮询逻辑 ====================
+
+const startPolling = (sessionId, onComplete) => {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await matchApi.getTaskStatus(sessionId)
+      if (res.code === 200) {
+        taskStatus.value = res.data
+        if (res.data.status === 'COMPLETED') {
+          stopPolling()
+          matching.value = false
+          onComplete(res.data.result)
+          ElMessage.success(`匹配完成，找到 ${res.data.result?.matches?.length || 0} 条结果`)
+        } else if (res.data.status === 'FAILED') {
+          stopPolling()
+          matching.value = false
+          ElMessage.error(`匹配失败：${res.data.errorMsg || '未知错误'}`)
+        }
+      }
+    } catch (e) {
+      console.error('轮询失败:', e)
+    }
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+// ==================== 匹配操作 ====================
+
+const handleTextMatch = async () => {
+  if (!textFormRef.value) return
+  await textFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    matching.value = true
+    textMatchResult.value = null
+    taskStatus.value = null
+
+    try {
+      const res = await matchApi.submitTextMatch({
+        query: textForm.query,
+        domainFilter: textForm.domainFilter || undefined,
+        topK: textForm.topK
+      })
+      if (res.code === 200) {
+        const { sessionId } = res.data
+        ElMessage.info('匹配任务已提交，正在分析中...')
+        startPolling(sessionId, (result) => {
+          textMatchResult.value = result
+        })
+      }
+    } catch (error) {
+      matching.value = false
+      console.error('提交匹配失败:', error)
+    }
+  })
+}
+
+const handlePatentMatch = async () => {
+  if (!patentFormRef.value) return
+  await patentFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    matching.value = true
+    patentMatchResult.value = null
+    taskStatus.value = null
+
+    try {
+      const res = await matchApi.submitPatentMatch(patentForm.patentId, {
+        topK: patentForm.topK
+      })
+      if (res.code === 200) {
+        const { sessionId } = res.data
+        ElMessage.info('匹配任务已提交，正在分析中...')
+        startPolling(sessionId, (result) => {
+          patentMatchResult.value = result
+        })
+      }
+    } catch (error) {
+      matching.value = false
+      console.error('提交匹配失败:', error)
+    }
+  })
+}
+
+const viewPatent = (id) => {
+  router.push(`/patent/detail/${id}`)
+}
+
+const resetTextForm = () => {
+  textFormRef.value?.resetFields()
+  textMatchResult.value = null
+  stopPolling()
+  matching.value = false
+  taskStatus.value = null
+}
+
+const resetPatentForm = () => {
+  patentFormRef.value?.resetFields()
+  patentMatchResult.value = null
+  stopPolling()
+  matching.value = false
+  taskStatus.value = null
+}
+
+// ==================== 专利搜索 ====================
 
 const loadDefaultPatents = async () => {
   try {
-    const res = await patentApi.getList({
-      page: 1,
-      size: 20,
-      parseStatus: 'SUCCESS'
-    })
+    const res = await patentApi.getList({ page: 1, size: 20, parseStatus: 'SUCCESS' })
     if (res.code === 200) {
       const existingIds = patentOptions.value.map(p => p.id)
       const newPatents = (res.data.records || []).filter(p => !existingIds.includes(p.id))
@@ -623,15 +755,9 @@ const searchPatents = async (query) => {
     await loadDefaultPatents()
     return
   }
-  
   searchLoading.value = true
   try {
-    const res = await patentApi.getList({
-      page: 1,
-      size: 20,
-      keyword: query,
-      parseStatus: 'SUCCESS'
-    })
+    const res = await patentApi.getList({ page: 1, size: 20, keyword: query, parseStatus: 'SUCCESS' })
     if (res.code === 200) {
       patentOptions.value = res.data.records || []
     }
@@ -642,80 +768,11 @@ const searchPatents = async (query) => {
   }
 }
 
-const handleTextMatch = async () => {
-  if (!textFormRef.value) return
-  
-  await textFormRef.value.validate(async (valid) => {
-    if (!valid) return
-    
-    matching.value = true
-    textMatchResult.value = null
-    
-    try {
-      const res = await matchApi.match({
-        query: textForm.query,
-        domainFilter: textForm.domainFilter || undefined,
-        topK: textForm.topK
-      })
-      
-      if (res.code === 200) {
-        textMatchResult.value = res.data
-        ElMessage.success(`匹配完成，找到 ${res.data.matches?.length || 0} 条结果`)
-      }
-    } catch (error) {
-      console.error('匹配失败:', error)
-    } finally {
-      matching.value = false
-    }
-  })
-}
-
-const handlePatentMatch = async () => {
-  if (!patentFormRef.value) return
-  
-  await patentFormRef.value.validate(async (valid) => {
-    if (!valid) return
-    
-    matching.value = true
-    patentMatchResult.value = null
-    
-    try {
-      const res = await matchApi.matchByPatent(patentForm.patentId, {
-        topK: patentForm.topK
-      })
-      
-      if (res.code === 200) {
-        patentMatchResult.value = res.data
-        ElMessage.success(`匹配完成，找到 ${res.data.matches?.length || 0} 条结果`)
-      }
-    } catch (error) {
-      console.error('匹配失败:', error)
-    } finally {
-      matching.value = false
-    }
-  })
-}
-
-const viewPatent = (id) => {
-  router.push(`/patent/detail/${id}`)
-}
-
-const resetTextForm = () => {
-  textFormRef.value?.resetFields()
-  textMatchResult.value = null
-}
-
-const resetPatentForm = () => {
-  patentFormRef.value?.resetFields()
-  patentMatchResult.value = null
-}
-
 const handlePatentIdFromUrl = async () => {
   const patentId = route.query.patentId
   if (patentId) {
     activeTab.value = 'patent'
     patentForm.patentId = Number(patentId)
-    
     try {
       const res = await patentApi.getDetail(patentId)
       if (res.code === 200) {
@@ -739,6 +796,10 @@ onActivated(async () => {
   await handlePatentIdFromUrl()
 })
 
+onUnmounted(() => {
+  stopPolling()
+})
+
 watch(() => route.query.patentId, async (newPatentId) => {
   if (newPatentId) {
     await handlePatentIdFromUrl()
@@ -752,10 +813,8 @@ watch(() => route.query.patentId, async (newPatentId) => {
   margin: 0 auto;
 }
 
-// 页面头部
 .page-header {
   margin-bottom: var(--space-6);
-  
   .page-desc {
     color: var(--color-text-muted);
     font-size: var(--text-sm);
@@ -763,7 +822,6 @@ watch(() => route.query.patentId, async (newPatentId) => {
   }
 }
 
-// 匹配方式切换
 .match-tabs {
   display: flex;
   gap: var(--space-3);
@@ -787,35 +845,20 @@ watch(() => route.query.patentId, async (newPatentId) => {
   cursor: pointer;
   transition: all var(--duration-normal) var(--ease-default);
 
-  svg {
-    color: var(--color-text-muted);
-    transition: color var(--duration-normal) var(--ease-default);
-  }
+  svg { color: var(--color-text-muted); transition: color var(--duration-normal) var(--ease-default); }
 
-  &:hover {
-    border-color: var(--color-border-dark);
-    color: var(--color-text-primary);
-  }
+  &:hover { border-color: var(--color-border-dark); color: var(--color-text-primary); }
 
   &.active {
     border-color: var(--color-accent);
     background-color: #F8FAFF;
     color: var(--color-accent);
-
-    svg {
-      color: var(--color-accent);
-    }
+    svg { color: var(--color-accent); }
   }
 }
 
-// 查询表单
-.query-card {
-  margin-bottom: var(--space-6);
-}
-
-.query-form {
-  max-width: 100%;
-}
+.query-card { margin-bottom: var(--space-6); }
+.query-form { max-width: 100%; }
 
 .query-textarea {
   :deep(.el-textarea__inner) {
@@ -837,10 +880,7 @@ watch(() => route.query.patentId, async (newPatentId) => {
   font-family: var(--font-mono);
 }
 
-.form-tip {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
+.form-tip { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 .form-row {
   display: grid;
@@ -849,28 +889,16 @@ watch(() => route.query.patentId, async (newPatentId) => {
   align-items: start;
 }
 
-.form-col {
-  margin-bottom: 0;
-}
-
-.domain-select {
-  width: 100%;
-}
-
-.patent-select {
-  width: 100%;
-}
+.form-col { margin-bottom: 0; }
+.domain-select { width: 100%; }
+.patent-select { width: 100%; }
 
 .slider-wrapper {
   display: flex;
   align-items: center;
   gap: var(--space-4);
   min-width: 300px;
-  
-  .el-slider {
-    flex: 1;
-    min-width: 200px;
-  }
+  .el-slider { flex: 1; min-width: 200px; }
 }
 
 .slider-value {
@@ -888,14 +916,8 @@ watch(() => route.query.patentId, async (newPatentId) => {
   flex-shrink: 0;
 }
 
-// 单独的滑动条表单项（专利匹配页）
-.slider-form-item {
-  max-width: 500px;
-}
-
-.slider-wrapper.full-width {
-  width: 100%;
-}
+.slider-form-item { max-width: 500px; }
+.slider-wrapper.full-width { width: 100%; }
 
 .form-actions {
   margin-top: var(--space-6);
@@ -903,26 +925,63 @@ watch(() => route.query.patentId, async (newPatentId) => {
   border-top: 1px solid var(--color-border-light);
   display: flex;
   gap: var(--space-3);
+  .el-button { min-width: 140px; }
+}
 
-  .el-button {
-    min-width: 140px;
-  }
+// 进度区域
+.matching-progress {
+  margin-top: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+}
+
+.progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.progress-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--color-accent);
+}
+
+.spin-icon {
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.progress-count {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.progress-tip {
+  margin: var(--space-2) 0 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 // 结果区域
-.results-section {
-  margin-top: var(--space-8);
-}
-
-.results-header {
-  margin-bottom: var(--space-5);
-}
+.results-section { margin-top: var(--space-8); }
+.results-header { margin-bottom: var(--space-5); }
 
 .results-title {
   display: flex;
   align-items: baseline;
   gap: var(--space-3);
-
   h2 {
     font-family: var(--font-heading);
     font-size: var(--text-xl);
@@ -930,24 +989,16 @@ watch(() => route.query.patentId, async (newPatentId) => {
     color: var(--color-text-primary);
     margin: 0;
   }
-
-  .results-count {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-  }
+  .results-count { font-size: var(--text-sm); color: var(--color-text-muted); }
 }
 
-// 实体分析卡片
-.analysis-card {
-  margin-bottom: var(--space-5);
-}
+.analysis-card { margin-bottom: var(--space-5); }
 
 .analysis-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-4);
-
   h3 {
     display: flex;
     align-items: center;
@@ -958,11 +1009,7 @@ watch(() => route.query.patentId, async (newPatentId) => {
     color: var(--color-text-primary);
     margin: 0;
   }
-
-  .entity-count {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-  }
+  .entity-count { font-size: var(--text-sm); color: var(--color-text-muted); }
 }
 
 .entity-tags {
@@ -983,16 +1030,11 @@ watch(() => route.query.patentId, async (newPatentId) => {
   position: relative;
   transition: all var(--duration-normal) var(--ease-default);
 
-  small {
-    font-size: var(--text-xs);
-    opacity: 0.7;
-  }
+  small { font-size: var(--text-xs); opacity: 0.7; }
 
-  // 匹配高亮状态
   &.entity-matched {
     box-shadow: 0 0 0 2px var(--color-success), var(--shadow-sm);
     transform: scale(1.02);
-    
     .match-indicator {
       display: flex;
       align-items: center;
@@ -1006,49 +1048,16 @@ watch(() => route.query.patentId, async (newPatentId) => {
     }
   }
 
-  &.entity-product {
-    background-color: #EFF6FF;
-    border-color: #BFDBFE;
-    color: #1E40AF;
-  }
-
-  &.entity-method {
-    background-color: #ECFDF5;
-    border-color: #A7F3D0;
-    color: #047857;
-  }
-
-  &.entity-material {
-    background-color: #FEF3C7;
-    border-color: #FDE68A;
-    color: #B45309;
-  }
-
-  &.entity-component {
-    background-color: #F3F4F6;
-    border-color: #D1D5DB;
-    color: #4B5563;
-  }
-
-  &.entity-effect {
-    background-color: #FEE2E2;
-    border-color: #FECACA;
-    color: #B91C1C;
-  }
-
-  &.entity-application {
-    background-color: #F3E8FF;
-    border-color: #DDD6FE;
-    color: #7C3AED;
-  }
+  &.entity-product { background-color: #EFF6FF; border-color: #BFDBFE; color: #1E40AF; }
+  &.entity-method { background-color: #ECFDF5; border-color: #A7F3D0; color: #047857; }
+  &.entity-material { background-color: #FEF3C7; border-color: #FDE68A; color: #B45309; }
+  &.entity-component { background-color: #F3F4F6; border-color: #D1D5DB; color: #4B5563; }
+  &.entity-effect { background-color: #FEE2E2; border-color: #FECACA; color: #B91C1C; }
+  &.entity-application { background-color: #F3E8FF; border-color: #DDD6FE; color: #7C3AED; }
 }
 
-.matched-hint {
-  color: var(--color-success);
-  font-weight: var(--font-medium);
-}
+.matched-hint { color: var(--color-success); font-weight: var(--font-medium); }
 
-// 匹配统计摘要
 .match-summary {
   display: flex;
   flex-wrap: wrap;
@@ -1064,7 +1073,6 @@ watch(() => route.query.patentId, async (newPatentId) => {
   gap: var(--space-2);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
-
   .summary-icon {
     display: flex;
     align-items: center;
@@ -1073,19 +1081,11 @@ watch(() => route.query.patentId, async (newPatentId) => {
     height: 24px;
     background: var(--color-bg-tertiary);
     border-radius: 50%;
-    
-    svg {
-      color: var(--color-accent);
-    }
+    svg { color: var(--color-accent); }
   }
-
-  strong {
-    color: var(--color-accent);
-    font-weight: var(--font-semibold);
-  }
+  strong { color: var(--color-accent); font-weight: var(--font-semibold); }
 }
 
-// 结果列表
 .results-list {
   display: flex;
   flex-direction: column;
@@ -1097,15 +1097,10 @@ watch(() => route.query.patentId, async (newPatentId) => {
   gap: var(--space-5);
   padding: var(--space-5);
   transition: all var(--duration-normal) var(--ease-default);
-
-  &:hover {
-    box-shadow: var(--shadow-md);
-  }
+  &:hover { box-shadow: var(--shadow-md); }
 }
 
-.result-rank {
-  flex-shrink: 0;
-}
+.result-rank { flex-shrink: 0; }
 
 .rank-number {
   display: flex;
@@ -1121,14 +1116,8 @@ watch(() => route.query.patentId, async (newPatentId) => {
   font-weight: var(--font-bold);
 }
 
-.result-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.result-header {
-  margin-bottom: var(--space-3);
-}
+.result-content { flex: 1; min-width: 0; }
+.result-header { margin-bottom: var(--space-3); }
 
 .result-title-row {
   display: flex;
@@ -1146,10 +1135,7 @@ watch(() => route.query.patentId, async (newPatentId) => {
   margin: 0;
   cursor: pointer;
   transition: color var(--duration-fast) var(--ease-default);
-
-  &:hover {
-    color: var(--color-accent-dark);
-  }
+  &:hover { color: var(--color-accent-dark); }
 }
 
 .score-badge {
@@ -1159,31 +1145,11 @@ watch(() => route.query.patentId, async (newPatentId) => {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
-
-  .score-value {
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
-  }
-
-  .score-unit {
-    font-size: var(--text-sm);
-    margin-left: 2px;
-  }
-
-  &.high {
-    background-color: #ECFDF5;
-    color: var(--color-success);
-  }
-
-  &.medium {
-    background-color: #FEF3C7;
-    color: var(--color-warning);
-  }
-
-  &.low {
-    background-color: #FEE2E2;
-    color: var(--color-danger);
-  }
+  .score-value { font-size: var(--text-xl); font-weight: var(--font-bold); }
+  .score-unit { font-size: var(--text-sm); margin-left: 2px; }
+  &.high { background-color: #ECFDF5; color: var(--color-success); }
+  &.medium { background-color: #FEF3C7; color: var(--color-warning); }
+  &.low { background-color: #FEE2E2; color: var(--color-danger); }
 }
 
 .result-meta {
@@ -1216,35 +1182,6 @@ watch(() => route.query.patentId, async (newPatentId) => {
   border-top: 1px solid var(--color-border-light);
 }
 
-.match-tags {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.match-tag {
-  font-size: var(--text-xs);
-  font-weight: var(--font-medium);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-
-  &.domain-match {
-    background-color: #ECFDF5;
-    color: var(--color-success);
-  }
-
-  &.cross-domain {
-    background-color: #F3F4F6;
-    color: var(--color-text-muted);
-  }
-
-  &.entity-match {
-    background-color: #EFF6FF;
-    color: var(--color-accent);
-  }
-}
-
-// 匹配标签区域
 .result-tags {
   display: flex;
   align-items: center;
@@ -1253,22 +1190,28 @@ watch(() => route.query.patentId, async (newPatentId) => {
   margin: var(--space-3) 0;
 }
 
+.match-tag {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  &.domain-match { background-color: #ECFDF5; color: var(--color-success); }
+  &.cross-domain { background-color: #F3F4F6; color: var(--color-text-muted); }
+  &.entity-match { background-color: #EFF6FF; color: var(--color-accent); }
+}
+
 .match-reason-brief {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   flex: 1;
 }
 
-// 详细匹配解释区域
 .match-explanation-section {
   margin: var(--space-4) 0;
   border-top: 1px solid var(--color-border-light);
   padding-top: var(--space-3);
 
-  :deep(.el-collapse) {
-    border: none;
-  }
-
+  :deep(.el-collapse) { border: none; }
   :deep(.el-collapse-item__header) {
     border: none;
     background: transparent;
@@ -1276,15 +1219,8 @@ watch(() => route.query.patentId, async (newPatentId) => {
     padding: var(--space-2) 0;
     font-size: var(--text-sm);
   }
-
-  :deep(.el-collapse-item__wrap) {
-    border: none;
-    background: transparent;
-  }
-
-  :deep(.el-collapse-item__content) {
-    padding-bottom: 0;
-  }
+  :deep(.el-collapse-item__wrap) { border: none; background: transparent; }
+  :deep(.el-collapse-item__content) { padding-bottom: 0; }
 }
 
 .explanation-toggle {
@@ -1294,10 +1230,7 @@ watch(() => route.query.patentId, async (newPatentId) => {
   color: var(--color-accent);
   font-weight: var(--font-medium);
   cursor: pointer;
-
-  svg {
-    flex-shrink: 0;
-  }
+  svg { flex-shrink: 0; }
 }
 
 .explanation-content {
@@ -1309,11 +1242,7 @@ watch(() => route.query.patentId, async (newPatentId) => {
 
 .explanation-block {
   margin-bottom: var(--space-4);
-
-  &:last-child {
-    margin-bottom: 0;
-  }
-
+  &:last-child { margin-bottom: 0; }
   h4 {
     display: flex;
     align-items: center;
@@ -1323,13 +1252,8 @@ watch(() => route.query.patentId, async (newPatentId) => {
     font-weight: var(--font-semibold);
     color: var(--color-text-primary);
     margin: 0 0 var(--space-2) 0;
-
-    svg {
-      color: var(--color-accent);
-      flex-shrink: 0;
-    }
+    svg { color: var(--color-accent); flex-shrink: 0; }
   }
-
   p {
     font-size: var(--text-sm);
     line-height: var(--leading-relaxed);
@@ -1338,7 +1262,6 @@ watch(() => route.query.patentId, async (newPatentId) => {
   }
 }
 
-// 技术相似性进度条
 .similarity-bars {
   display: flex;
   flex-direction: column;
@@ -1350,17 +1273,8 @@ watch(() => route.query.patentId, async (newPatentId) => {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-
-  .similarity-label {
-    width: 80px;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    flex-shrink: 0;
-  }
-
-  .el-progress {
-    flex: 1;
-  }
+  .similarity-label { width: 80px; font-size: var(--text-xs); color: var(--color-text-muted); flex-shrink: 0; }
+  .el-progress { flex: 1; }
 }
 
 .key-difference {
@@ -1370,18 +1284,10 @@ watch(() => route.query.patentId, async (newPatentId) => {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--color-warning);
-
-  strong {
-    color: var(--color-text-primary);
-  }
+  strong { color: var(--color-text-primary); }
 }
 
-// 实体匹配列表
-.entity-match-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
+.entity-match-list { display: flex; flex-direction: column; gap: var(--space-3); }
 
 .entity-match-item {
   background: var(--color-bg-primary);
@@ -1401,11 +1307,7 @@ watch(() => route.query.patentId, async (newPatentId) => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-
-  svg {
-    color: var(--color-text-muted);
-    flex-shrink: 0;
-  }
+  svg { color: var(--color-text-muted); flex-shrink: 0; }
 }
 
 .query-entity,
@@ -1414,36 +1316,12 @@ watch(() => route.query.patentId, async (newPatentId) => {
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
-
-  &.entity-product {
-    background-color: #EFF6FF;
-    color: #1E40AF;
-  }
-
-  &.entity-method {
-    background-color: #ECFDF5;
-    color: #047857;
-  }
-
-  &.entity-material {
-    background-color: #FEF3C7;
-    color: #B45309;
-  }
-
-  &.entity-component {
-    background-color: #F3F4F6;
-    color: #4B5563;
-  }
-
-  &.entity-effect {
-    background-color: #FEE2E2;
-    color: #B91C1C;
-  }
-
-  &.entity-application {
-    background-color: #F3E8FF;
-    color: #7C3AED;
-  }
+  &.entity-product { background-color: #EFF6FF; color: #1E40AF; }
+  &.entity-method { background-color: #ECFDF5; color: #047857; }
+  &.entity-material { background-color: #FEF3C7; color: #B45309; }
+  &.entity-component { background-color: #F3F4F6; color: #4B5563; }
+  &.entity-effect { background-color: #FEE2E2; color: #B91C1C; }
+  &.entity-application { background-color: #F3E8FF; color: #7C3AED; }
 }
 
 .entity-similarity {
@@ -1474,55 +1352,54 @@ watch(() => route.query.patentId, async (newPatentId) => {
   flex-shrink: 0;
 }
 
-// 空结果
 .empty-results {
   text-align: center;
   padding: var(--space-12) 0;
   color: var(--color-text-muted);
-
-  svg {
-    margin-bottom: var(--space-4);
-  }
-
+  svg { margin-bottom: var(--space-4); }
   h3 {
     font-family: var(--font-heading);
     font-size: var(--text-lg);
     color: var(--color-text-secondary);
     margin-bottom: var(--space-2);
   }
+  p { margin: 0; }
+}
 
-  p {
+.empty-tips {
+  display: inline-block;
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-warning);
+  text-align: left;
+  .tips-title {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    margin-bottom: var(--space-1) !important;
+  }
+  ul {
     margin: 0;
+    padding-left: 1.2em;
+    list-style: disc;
+    li {
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+      line-height: var(--leading-relaxed);
+      margin-bottom: var(--space-1);
+      strong { color: var(--color-accent); font-weight: var(--font-medium); }
+    }
   }
 }
 
-// 响应式
 @media (max-width: 768px) {
-  .match-tabs {
-    flex-direction: column;
-  }
-
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-
-  .result-card {
-    flex-direction: column;
-  }
-
-  .result-title-row {
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .score-badge {
-    align-self: flex-start;
-  }
-
-  .result-footer {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-3);
-  }
+  .match-tabs { flex-direction: column; }
+  .form-row { grid-template-columns: 1fr; }
+  .result-card { flex-direction: column; }
+  .result-title-row { flex-direction: column; gap: var(--space-2); }
+  .score-badge { align-self: flex-start; }
+  .result-footer { flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 }
 </style>

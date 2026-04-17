@@ -25,6 +25,11 @@ public class MatchRecord {
     private Long userId;
 
     /**
+     * 匹配会话ID（同一次匹配请求共享，用于历史聚合）
+     */
+    private String sessionId;
+
+    /**
      * 匹配模式：PATENT-专利匹配/TEXT-文本查询
      */
     private String matchMode;
@@ -33,6 +38,11 @@ public class MatchRecord {
      * 源专利ID（专利匹配时使用）
      */
     private Long sourcePatentId;
+
+    /**
+     * 源专利名称（冗余存储）
+     */
+    private String sourcePatentTitle;
 
     /**
      * 查询文本（文本查询时使用）
@@ -53,6 +63,16 @@ public class MatchRecord {
      * 目标专利ID
      */
     private Long targetPatentId;
+
+    /**
+     * 目标专利名称（冗余存储，便于历史查询）
+     */
+    private String targetPatentTitle;
+
+    /**
+     * 本次匹配要求返回的数量
+     */
+    private Integer topK;
 
     /**
      * 相似度评分（0.0000-1.0000）

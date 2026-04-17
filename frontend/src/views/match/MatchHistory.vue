@@ -35,19 +35,14 @@
         </div>
       </div>
       
-      <!-- 历史记录表格 -->
+      <!-- 历史记录表格（按session聚合，一次匹配=一行） -->
       <el-table
         v-loading="loading"
         :data="historyList"
         class="history-table"
         stripe
+        row-key="sessionId"
       >
-        <el-table-column prop="id" label="ID" width="70" align="center">
-          <template #default="{ row }">
-            <span class="id-badge">{{ row.id }}</span>
-          </template>
-        </el-table-column>
-        
         <el-table-column prop="matchMode" label="模式" width="100" align="center">
           <template #default="{ row }">
             <span class="mode-badge" :class="row.matchMode === 'TEXT' ? 'text' : 'patent'">
@@ -56,44 +51,41 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="查询来源" min-width="240">
+        <el-table-column label="查询来源" min-width="280">
           <template #default="{ row }">
             <template v-if="row.matchMode === 'TEXT'">
-              <span class="query-text">{{ truncateText(row.queryText, 80) }}</span>
+              <span class="query-text">{{ truncateText(row.querySource, 80) }}</span>
             </template>
             <template v-else>
               <el-link type="primary" :underline="false" @click="viewPatent(row.sourcePatentId)">
-                专利 #{{ row.sourcePatentId }}
+                {{ truncateText(row.querySource, 50) || `专利 #${row.sourcePatentId}` }}
               </el-link>
             </template>
           </template>
         </el-table-column>
         
-        <el-table-column label="匹配专利" width="180">
+        <el-table-column label="匹配专利" min-width="200">
           <template #default="{ row }">
-            <el-link 
-              type="primary" 
-              :underline="false"
-              @click="viewPatent(row.targetPatentId)"
-            >
-              {{ row.targetPatent?.title ? truncateText(row.targetPatent.title, 20) : `#${row.targetPatentId}` }}
-            </el-link>
+            <div class="match-preview">
+              <span class="match-count-badge">{{ row.matchCount }} 条</span>
+              <div v-if="row.topMatches?.length" class="top-matches">
+                <span
+                  v-for="m in row.topMatches"
+                  :key="m.targetPatentId"
+                  class="top-match-item"
+                  @click="viewPatent(m.targetPatentId)"
+                >
+                  {{ truncateText(m.targetPatentTitle, 15) }}
+                  <span class="match-score">{{ (m.similarityScore * 100).toFixed(0) }}%</span>
+                </span>
+              </div>
+            </div>
           </template>
         </el-table-column>
-        
-        <el-table-column prop="similarityScore" label="相似度" width="100" align="center">
+
+        <el-table-column label="要求数量" width="90" align="center">
           <template #default="{ row }">
-            <span class="score-badge" :class="getScoreClass(row.similarityScore)">
-              {{ (row.similarityScore * 100).toFixed(1) }}%
-            </span>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="domainMatch" label="领域" width="80" align="center">
-          <template #default="{ row }">
-            <span class="domain-badge" :class="(row.domainMatch === 1 || row.domainMatch === true) ? 'match' : 'cross'">
-              {{ (row.domainMatch === 1 || row.domainMatch === true) ? '匹配' : '跨域' }}
-            </span>
+            <span class="topk-badge">Top {{ row.topK }}</span>
           </template>
         </el-table-column>
         
@@ -105,7 +97,7 @@
         
         <el-table-column label="操作" width="100" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="viewDetail(row)">
+            <el-button size="small" type="primary" link @click="viewSessionDetail(row)">
               查看详情
             </el-button>
           </template>
@@ -120,88 +112,210 @@
           共 {{ total }} 条记录
         </div>
         <el-pagination
-          v-model:current-page="pagination.page"
-          v-model:page-size="pagination.size"
+          :current-page="pagination.page"
+          :page-size="pagination.size"
           :page-sizes="[10, 20, 50, 100]"
           :total="total"
           layout="sizes, prev, pager, next"
-          @size-change="handleSizeChange"
-          @current-change="handlePageChange"
+          @size-change="(val) => { pagination.size = val; handleSizeChange() }"
+          @current-change="(val) => { pagination.page = val; handlePageChange() }"
         />
       </div>
     </div>
     
-    <!-- 详情弹窗 -->
-    <el-dialog 
-      v-model="showDetailDialog" 
-      title="匹配详情" 
-      width="700"
-      class="detail-dialog"
+    <!-- Session 详情抽屉 -->
+    <el-drawer
+      v-model="showDetailDrawer"
+      :title="drawerTitle"
+      size="680px"
+      direction="rtl"
+      class="detail-drawer"
     >
-      <template v-if="currentRecord">
-        <div class="detail-grid">
-          <div class="detail-item">
-            <span class="detail-label">匹配模式</span>
-            <span class="mode-badge" :class="currentRecord.matchMode === 'TEXT' ? 'text' : 'patent'">
-              {{ currentRecord.matchMode === 'TEXT' ? '文本查询' : '专利匹配' }}
+      <div v-if="currentSession" class="drawer-content">
+        <!-- 基本信息 -->
+        <div class="session-info">
+          <div class="info-row">
+            <span class="info-label">匹配模式</span>
+            <span class="mode-badge" :class="currentSession.matchMode === 'TEXT' ? 'text' : 'patent'">
+              {{ currentSession.matchMode === 'TEXT' ? '文本查询' : '专利匹配' }}
             </span>
           </div>
-          <div class="detail-item">
-            <span class="detail-label">相似度</span>
-            <span class="score-badge large" :class="getScoreClass(currentRecord.similarityScore)">
-              {{ (currentRecord.similarityScore * 100).toFixed(1) }}%
-            </span>
+          <div class="info-row">
+            <span class="info-label">查询来源</span>
+            <span class="info-value query-source-text">{{ currentSession.querySource }}</span>
           </div>
-          <div class="detail-item">
-            <span class="detail-label">匹配类型</span>
-            <span class="detail-value">{{ currentRecord.matchType }}</span>
+          <div class="info-row">
+            <span class="info-label">要求返回</span>
+            <span class="info-value">Top {{ currentSession.topK }}</span>
           </div>
-          <div class="detail-item">
-            <span class="detail-label">领域匹配</span>
-            <span class="domain-badge" :class="(currentRecord.domainMatch === 1 || currentRecord.domainMatch === true) ? 'match' : 'cross'">
-              {{ (currentRecord.domainMatch === 1 || currentRecord.domainMatch === true) ? '是' : '否' }}
-            </span>
+          <div class="info-row">
+            <span class="info-label">实际匹配</span>
+            <span class="info-value"><strong>{{ currentSession.matchCount }}</strong> 条专利</span>
           </div>
-          <div class="detail-item">
-            <span class="detail-label">实体匹配数</span>
-            <span class="detail-value">{{ currentRecord.entityMatchCount || 0 }}</span>
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">匹配时间</span>
-            <span class="detail-value">{{ formatDate(currentRecord.createdAt) }}</span>
+          <div class="info-row">
+            <span class="info-label">匹配时间</span>
+            <span class="info-value">{{ formatDate(currentSession.createdAt) }}</span>
           </div>
         </div>
-        
-        <div v-if="currentRecord.queryText" class="detail-section">
-          <h4 class="section-title">查询文本</h4>
-          <p class="section-content">{{ currentRecord.queryText }}</p>
+
+        <!-- 加载中 -->
+        <div v-if="detailLoading" class="detail-loading">
+          <el-icon class="spin-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            </svg>
+          </el-icon>
+          加载详细匹配信息...
         </div>
-        
-        <div v-if="currentRecord.queryEntities" class="detail-section">
-          <h4 class="section-title">查询实体</h4>
-          <div class="entity-tags">
-            <span
-              v-for="(entity, index) in parseEntities(currentRecord.queryEntities)"
-              :key="index"
-              class="entity-tag"
+
+        <template v-else-if="sessionDetail">
+          <!-- 查询实体分析 -->
+          <div v-if="sessionDetail.queryEntities?.length" class="analysis-card">
+            <div class="analysis-header">
+              <h3>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="16" x2="12" y2="12"/>
+                  <line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+                查询实体分析
+              </h3>
+              <span class="entity-count">识别到 {{ sessionDetail.queryEntities.length }} 个技术实体</span>
+            </div>
+            <div class="entity-tags">
+              <span
+                v-for="(entity, idx) in sessionDetail.queryEntities"
+                :key="idx"
+                class="entity-tag"
+                :class="`entity-${entity.type?.toLowerCase()}`"
+              >
+                <span class="entity-name">{{ entity.name }}</span>
+                <small>{{ entity.type }}</small>
+              </span>
+            </div>
+          </div>
+
+          <!-- 匹配结果列表 -->
+          <div class="detail-list-header">
+            <h4>匹配专利列表（共 {{ sessionDetail.matches?.length || 0 }} 条，按相似度排序）</h4>
+          </div>
+
+          <div v-if="sessionDetail.matches?.length" class="detail-list">
+            <div
+              v-for="(item, index) in sessionDetail.matches"
+              :key="item.targetPatentId"
+              class="result-card"
             >
-              {{ entity.text || entity.name }}
-              <small>{{ entity.type }}</small>
-            </span>
+              <!-- 排名 -->
+              <div class="result-rank">
+                <span class="rank-number">{{ index + 1 }}</span>
+              </div>
+
+              <!-- 内容 -->
+              <div class="result-content">
+                <!-- 标题行 -->
+                <div class="result-title-row">
+                  <h3 class="result-title" @click="viewPatent(item.targetPatentId)">
+                    {{ item.targetPatentTitle }}
+                  </h3>
+                  <div class="score-badge" :class="getScoreClass(item.similarityScore)">
+                    <span class="score-value">{{ (item.similarityScore * 100).toFixed(1) }}</span>
+                    <span class="score-unit">%</span>
+                  </div>
+                </div>
+
+                <!-- 元信息 -->
+                <div class="result-meta">
+                  <span v-if="item.publicationNo" class="meta-item">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    {{ item.publicationNo }}
+                  </span>
+                  <span v-if="item.applicant" class="meta-item">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                      <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                    {{ item.applicant }}
+                  </span>
+                  <span v-if="item.domainCodes?.length" class="meta-item">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                      <path d="M3 9h18M9 21V9"/>
+                    </svg>
+                    {{ item.domainCodes.slice(0, 3).join(', ') }}
+                  </span>
+                </div>
+
+                <!-- 摘要 -->
+                <p v-if="item.patentAbstract" class="result-abstract">
+                  {{ truncateText(item.patentAbstract, 180) }}
+                </p>
+
+                <!-- 标签行 -->
+                <div class="result-tags">
+                  <span
+                    class="match-tag"
+                    :class="item.domainMatch ? 'domain-match' : 'cross-domain'"
+                  >
+                    {{ item.domainMatch ? '领域匹配' : '跨领域' }}
+                  </span>
+                  <span v-if="item.entityMatchCount" class="match-tag entity-match">
+                    实体匹配: {{ item.entityMatchCount }}
+                  </span>
+                  <span v-if="item.matchReason" class="match-reason-brief">
+                    {{ truncateText(item.matchReason, 60) }}
+                  </span>
+                </div>
+
+                <!-- 详细匹配原因（可展开） -->
+                <div v-if="item.matchReason" class="match-reason-section">
+                  <el-collapse v-model="expandedItems[item.targetPatentId]">
+                    <el-collapse-item :name="item.targetPatentId">
+                      <template #title>
+                        <div class="reason-toggle">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                          </svg>
+                          <span>查看匹配分析原因</span>
+                        </div>
+                      </template>
+                      <div class="reason-content">
+                        <p>{{ item.matchReason }}</p>
+                      </div>
+                    </el-collapse-item>
+                  </el-collapse>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="result-footer">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    @click="viewPatent(item.targetPatentId)"
+                  >
+                    查看专利详情
+                  </el-button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-        
-        <div v-if="currentRecord.matchReason" class="detail-section">
-          <h4 class="section-title">匹配原因</h4>
-          <p class="section-content">{{ currentRecord.matchReason }}</p>
-        </div>
-      </template>
-    </el-dialog>
+
+          <div v-else class="detail-empty">
+            暂无匹配记录
+          </div>
+        </template>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { matchApi } from '@/api/match'
 
@@ -210,8 +324,11 @@ const router = useRouter()
 const loading = ref(false)
 const historyList = ref([])
 const total = ref(0)
-const showDetailDialog = ref(false)
-const currentRecord = ref(null)
+const showDetailDrawer = ref(false)
+const currentSession = ref(null)
+const sessionDetail = ref(null)
+const detailLoading = ref(false)
+const expandedItems = ref({})
 
 const filterForm = reactive({
   matchMode: ''
@@ -222,9 +339,16 @@ const pagination = reactive({
   size: 10
 })
 
+const drawerTitle = computed(() => {
+  if (!currentSession.value) return '匹配详情'
+  const mode = currentSession.value.matchMode === 'TEXT' ? '文本查询' : '专利匹配'
+  return `${mode} - 匹配详情`
+})
+
 const getScoreClass = (score) => {
-  if (score >= 0.8) return 'high'
-  if (score >= 0.6) return 'medium'
+  const s = parseFloat(score)
+  if (s >= 0.8) return 'high'
+  if (s >= 0.6) return 'medium'
   return 'low'
 }
 
@@ -242,15 +366,6 @@ const formatDate = (dateStr) => {
     hour: '2-digit',
     minute: '2-digit'
   })
-}
-
-const parseEntities = (entitiesJson) => {
-  if (!entitiesJson) return []
-  try {
-    return JSON.parse(entitiesJson)
-  } catch {
-    return []
-  }
 }
 
 const fetchHistory = async () => {
@@ -293,12 +408,27 @@ const handlePageChange = () => {
 }
 
 const viewPatent = (id) => {
+  if (!id) return
   router.push(`/patent/detail/${id}`)
 }
 
-const viewDetail = (row) => {
-  currentRecord.value = row
-  showDetailDialog.value = true
+const viewSessionDetail = async (session) => {
+  currentSession.value = session
+  showDetailDrawer.value = true
+  sessionDetail.value = null
+  expandedItems.value = {}
+  detailLoading.value = true
+
+  try {
+    const res = await matchApi.getSessionDetails(session.sessionId)
+    if (res.code === 200) {
+      sessionDetail.value = res.data || { queryEntities: [], matches: [] }
+    }
+  } catch (error) {
+    console.error('获取session详情失败:', error)
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -312,10 +442,8 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-// 页面头部
 .page-header {
   margin-bottom: var(--space-6);
-  
   .page-desc {
     color: var(--color-text-muted);
     font-size: var(--text-sm);
@@ -323,7 +451,6 @@ onMounted(() => {
   }
 }
 
-// 筛选区域
 .filter-section {
   margin-bottom: var(--space-5);
   padding-bottom: var(--space-5);
@@ -336,29 +463,9 @@ onMounted(() => {
   gap: var(--space-3);
 }
 
-.mode-select {
-  width: 150px;
-}
+.mode-select { width: 150px; }
 
-// 表格
-.history-table {
-  margin-bottom: var(--space-5);
-}
-
-.id-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 36px;
-  height: 24px;
-  padding: 0 var(--space-2);
-  background-color: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--font-medium);
-  color: var(--color-text-secondary);
-}
+.history-table { margin-bottom: var(--space-5); }
 
 .mode-badge {
   display: inline-flex;
@@ -369,15 +476,8 @@ onMounted(() => {
   font-size: var(--text-xs);
   font-weight: var(--font-medium);
 
-  &.text {
-    background-color: #EFF6FF;
-    color: var(--color-accent);
-  }
-
-  &.patent {
-    background-color: #ECFDF5;
-    color: var(--color-success);
-  }
+  &.text { background-color: #EFF6FF; color: var(--color-accent); }
+  &.patent { background-color: #ECFDF5; color: var(--color-success); }
 }
 
 .query-text {
@@ -385,39 +485,64 @@ onMounted(() => {
   color: var(--color-text-secondary);
 }
 
-.score-badge {
-  display: inline-flex;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-weight: var(--font-semibold);
-
-  &.high { color: var(--color-success); }
-  &.medium { color: var(--color-warning); }
-  &.low { color: var(--color-danger); }
-
-  &.large {
-    font-size: var(--text-lg);
-  }
+// 匹配专利预览
+.match-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
-.domain-badge {
+.match-count-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  width: fit-content;
+}
+
+.top-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.top-match-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  cursor: pointer;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-xs);
+  transition: background 0.15s;
+
+  &:hover { background: var(--color-bg-tertiary); }
+}
+
+.match-score {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: var(--space-2);
+  flex-shrink: 0;
+}
+
+.topk-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-xs);
   font-size: var(--text-xs);
-  font-weight: var(--font-medium);
-
-  &.match {
-    background-color: #ECFDF5;
-    color: var(--color-success);
-  }
-
-  &.cross {
-    background-color: #F3F4F6;
-    color: var(--color-text-muted);
-  }
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
 }
 
 .date-text {
@@ -425,7 +550,6 @@ onMounted(() => {
   color: var(--color-text-muted);
 }
 
-// 分页
 .pagination-wrapper {
   display: flex;
   align-items: center;
@@ -439,64 +563,119 @@ onMounted(() => {
   color: var(--color-text-muted);
 }
 
-// 详情弹窗
-:deep(.detail-dialog) {
-  .el-dialog__header {
+// ==================== 抽屉样式 ====================
+:deep(.detail-drawer) {
+  .el-drawer__header {
     padding: var(--space-5) var(--space-6);
     border-bottom: 1px solid var(--color-border-light);
+    margin-bottom: 0;
   }
-
-  .el-dialog__body {
-    padding: var(--space-6);
+  .el-drawer__body {
+    padding: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
   }
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-4);
-  padding: var(--space-4);
-  background-color: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-5);
-}
-
-.detail-item {
+.drawer-content {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  min-height: 100%;
 }
 
-.detail-label {
+// 基本信息块
+.session-info {
+  padding: var(--space-5) var(--space-6);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.info-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+
+  &:not(:last-child) {
+    border-bottom: 1px solid var(--color-border-light);
+  }
+}
+
+.info-label {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  width: 72px;
+  flex-shrink: 0;
+  padding-top: 2px;
 }
 
-.detail-value {
+.info-value {
   font-size: var(--text-sm);
-  font-weight: var(--font-medium);
   color: var(--color-text-primary);
+  flex: 1;
+  word-break: break-all;
+
+  strong { color: var(--color-accent); }
 }
 
-.detail-section {
-  margin-top: var(--space-5);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--color-border-light);
-}
-
-.section-title {
-  font-family: var(--font-heading);
-  font-size: var(--text-sm);
-  font-weight: var(--font-semibold);
-  color: var(--color-text-primary);
-  margin-bottom: var(--space-3);
-}
-
-.section-content {
-  font-size: var(--text-sm);
+.query-source-text {
   line-height: var(--leading-relaxed);
-  color: var(--color-text-secondary);
-  margin: 0;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+// 加载中
+.detail-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-10) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.spin-icon {
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+// 查询实体分析
+.analysis-card {
+  margin: var(--space-5) var(--space-6);
+  padding: var(--space-4);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+}
+
+.analysis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-text-primary);
+    margin: 0;
+    svg { color: var(--color-accent); }
+  }
+
+  .entity-count {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
 }
 
 .entity-tags {
@@ -509,14 +688,215 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  background-color: var(--color-bg-tertiary);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  border: 1px solid;
 
-  small {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
+  small { font-size: 10px; opacity: 0.7; }
+
+  &.entity-product { background-color: #EFF6FF; border-color: #BFDBFE; color: #1E40AF; }
+  &.entity-method { background-color: #ECFDF5; border-color: #A7F3D0; color: #047857; }
+  &.entity-material { background-color: #FEF3C7; border-color: #FDE68A; color: #B45309; }
+  &.entity-component { background-color: #F3F4F6; border-color: #D1D5DB; color: #4B5563; }
+  &.entity-effect { background-color: #FEE2E2; border-color: #FECACA; color: #B91C1C; }
+  &.entity-application { background-color: #F3E8FF; border-color: #DDD6FE; color: #7C3AED; }
+}
+
+// 列表头
+.detail-list-header {
+  padding: var(--space-4) var(--space-6) var(--space-2);
+  flex-shrink: 0;
+
+  h4 {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-text-primary);
+    margin: 0;
   }
+}
+
+// 结果列表
+.detail-list {
+  padding: 0 var(--space-6) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+// 单条结果卡片
+.result-card {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  transition: box-shadow 0.2s;
+
+  &:hover { box-shadow: var(--shadow-sm); }
+}
+
+.result-rank {
+  flex-shrink: 0;
+}
+
+.rank-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%);
+  color: #fff;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold);
+}
+
+.result-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.result-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.result-title {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  color: var(--color-accent);
+  margin: 0;
+  cursor: pointer;
+  line-height: var(--leading-snug);
+  transition: color 0.15s;
+  &:hover { color: var(--color-accent-dark); }
+}
+
+.score-badge {
+  display: flex;
+  align-items: baseline;
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+
+  .score-value { font-size: var(--text-base); font-weight: var(--font-bold); }
+  .score-unit { font-size: var(--text-xs); margin-left: 1px; }
+
+  &.high { background-color: #ECFDF5; color: var(--color-success); }
+  &.medium { background-color: #FEF3C7; color: var(--color-warning); }
+  &.low { background-color: #FEE2E2; color: var(--color-danger); }
+}
+
+.result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  svg { flex-shrink: 0; }
+}
+
+.result-abstract {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--color-text-secondary);
+  margin: var(--space-2) 0;
+}
+
+.result-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+.match-tag {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+
+  &.domain-match { background-color: #ECFDF5; color: var(--color-success); }
+  &.cross-domain { background-color: #F3F4F6; color: var(--color-text-muted); }
+  &.entity-match { background-color: #EFF6FF; color: var(--color-accent); }
+}
+
+.match-reason-brief {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  flex: 1;
+}
+
+// 匹配原因展开区
+.match-reason-section {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+  padding-top: var(--space-2);
+
+  :deep(.el-collapse) { border: none; }
+  :deep(.el-collapse-item__header) {
+    border: none;
+    background: transparent;
+    height: auto;
+    padding: var(--space-2) 0;
+    font-size: var(--text-sm);
+    color: var(--color-accent);
+  }
+  :deep(.el-collapse-item__wrap) { border: none; background: transparent; }
+  :deep(.el-collapse-item__content) { padding-bottom: 0; }
+}
+
+.reason-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-accent);
+  font-weight: var(--font-medium);
+  font-size: var(--text-sm);
+  svg { flex-shrink: 0; color: var(--color-accent); }
+}
+
+.reason-content {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-2);
+
+  p {
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+    margin: 0;
+  }
+}
+
+.result-footer {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.detail-empty {
+  text-align: center;
+  padding: var(--space-10) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 </style>

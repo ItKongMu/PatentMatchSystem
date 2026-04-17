@@ -89,22 +89,22 @@ public class PatentCsvDTO {
             }
         }
 
-        // 正文长度校验（可选字段）
-        if (fullText != null && fullText.length() > 100000) {
+        // 正文长度校验（可选字段）。修复：先 trim 后再校验长度，避免纯空白内容占用长度配额。
+        if (fullText != null && !fullText.trim().isEmpty() && fullText.trim().length() > 100000) {
             this.valid = false;
             this.errorMessage = "专利正文长度不能超过10万个字符";
             return;
         }
 
-        // 申请人长度校验
-        if (applicant != null && applicant.length() > 200) {
+        // 申请人长度校验（trim 后校验）
+        if (applicant != null && applicant.trim().length() > 200) {
             this.valid = false;
             this.errorMessage = "申请人长度不能超过200个字符";
             return;
         }
 
-        // IPC分类号长度校验
-        if (ipcClassification != null && ipcClassification.length() > 500) {
+        // IPC分类号长度校验（trim 后校验）
+        if (ipcClassification != null && ipcClassification.trim().length() > 500) {
             this.valid = false;
             this.errorMessage = "IPC分类号长度不能超过500个字符";
         }

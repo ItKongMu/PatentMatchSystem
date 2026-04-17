@@ -34,6 +34,8 @@ minio:
 
 patent:
   llm-mode: online
+  # 开发环境降低相似度阈值，避免向量库数量不足时无候选结果（生产默认0.6）
+  similarity-threshold: 0.3
 
 # 开发环境显示SQL
 mybatis-plus:

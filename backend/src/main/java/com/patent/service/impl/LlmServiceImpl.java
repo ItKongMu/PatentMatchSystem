@@ -147,13 +147,14 @@ public class LlmServiceImpl implements LlmService {
 
     @Override
     public PatentAnalysisResult extractEntitiesAndDomain(String patentText) {
-        // 限制输入文本长度，避免超时
-        String truncatedText = truncateText(patentText, 4000);
+        // 使用首尾分段截取策略，保留最有价值的内容
+        String truncatedText = truncateTextSmartly(patentText, 4000);
         
         try {
             String prompt = String.format(ENTITY_EXTRACTION_PROMPT, truncatedText);
 
-            log.info("开始调用LLM进行实体提取，文本长度: {}", truncatedText.length());
+            log.info("开始调用LLM进行实体提取，原文长度: {}, 截取后长度: {}",
+                    patentText != null ? patentText.length() : 0, truncatedText.length());
             long startTime = System.currentTimeMillis();
 
             String response = buildChatClient().prompt()
@@ -174,9 +175,37 @@ public class LlmServiceImpl implements LlmService {
             return new PatentAnalysisResult(List.of(), null, List.of());
         }
     }
-    
+
     /**
-     * 截断文本到指定长度
+     * 智能截取文本：保留首段（技术背景/发明目的）和尾段（权利要求/效果），
+     * 比简单截断头部能覆盖更完整的技术信息。
+     *
+     * <p>策略：
+     * <ul>
+     *   <li>若文本 ≤ maxLength：原样返回</li>
+     *   <li>若文本 > maxLength：取首部 70% + 分隔符 + 尾部 30%</li>
+     * </ul>
+     * </p>
+     *
+     * @param text      原始文本
+     * @param maxLength 最大字符数
+     * @return 截取后的文本
+     */
+    private String truncateTextSmartly(String text, int maxLength) {
+        if (text == null) return "";
+        if (text.length() <= maxLength) return text;
+
+        int headLen = (int) (maxLength * 0.70);
+        int tailLen = maxLength - headLen;
+
+        String head = text.substring(0, headLen);
+        String tail = text.substring(text.length() - tailLen);
+
+        return head + "\n...[正文过长，已省略中间部分]...\n" + tail;
+    }
+
+    /**
+     * 简单截断（保留向后兼容）
      */
     private String truncateText(String text, int maxLength) {
         if (text == null) return "";

@@ -95,17 +95,35 @@ public class VectorServiceImpl implements VectorService {
 
     @Override
     public List<Document> semanticSearch(String queryText, String domainFilter, int topK) {
+        return semanticSearch(queryText, domainFilter, topK, null);
+    }
+
+    @Override
+    public List<Document> semanticSearch(String queryText, String domainFilter, int topK, Long excludePatentId) {
         try {
+            FilterExpressionBuilder b = new FilterExpressionBuilder();
+            FilterExpressionBuilder.Op filterExpr = null;
+
+            // 构造过滤条件
+            if (domainFilter != null && !domainFilter.isEmpty() && excludePatentId != null) {
+                // 同时过滤领域和排除自身
+                filterExpr = b.and(
+                        b.eq("domain_section", domainFilter),
+                        b.ne("patent_id", excludePatentId)
+                );
+            } else if (domainFilter != null && !domainFilter.isEmpty()) {
+                filterExpr = b.eq("domain_section", domainFilter);
+            } else if (excludePatentId != null) {
+                filterExpr = b.ne("patent_id", excludePatentId);
+            }
+
             SearchRequest searchRequest;
-            
-            // 可选：领域过滤
-            if (domainFilter != null && !domainFilter.isEmpty()) {
-                FilterExpressionBuilder b = new FilterExpressionBuilder();
+            if (filterExpr != null) {
                 searchRequest = SearchRequest.builder()
                         .query(queryText)
                         .topK(topK)
                         .similarityThreshold(patentConfig.getSimilarityThreshold())
-                        .filterExpression(b.eq("domain_section", domainFilter).build())
+                        .filterExpression(filterExpr.build())
                         .build();
             } else {
                 searchRequest = SearchRequest.builder()
@@ -116,9 +134,12 @@ public class VectorServiceImpl implements VectorService {
             }
 
             List<Document> results = vectorStore.similaritySearch(searchRequest);
-            log.info("语义检索完成，查询: {}, 结果数: {}", 
-                    queryText.substring(0, Math.min(50, queryText.length())), results.size());
-            
+            log.info("语义检索完成，查询: {}, 结果数: {}, 阈值: {}, 排除专利ID: {}",
+                    queryText.substring(0, Math.min(50, queryText.length())),
+                    results.size(),
+                    patentConfig.getSimilarityThreshold(),
+                    excludePatentId);
+
             return results;
 
         } catch (Exception e) {

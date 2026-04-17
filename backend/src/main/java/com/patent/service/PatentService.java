@@ -99,4 +99,19 @@ public interface PatentService {
      * @return 导入结果
      */
     CsvImportResultVO importCsvData(List<PatentCsvDTO> dataList, boolean autoProcess);
+
+    /**
+     * 批量处理专利（触发处理流程）
+     *
+     * @param patentIds 专利ID列表
+     * @return 成功触发数量
+     */
+    int batchProcessPatents(List<Long> patentIds);
+
+    /**
+     * 批量删除专利
+     *
+     * @param patentIds 专利ID列表
+     */
+    void batchDeletePatents(List<Long> patentIds);
 }

@@ -53,15 +53,4 @@ export const graphApi = {
     })
   },
 
-  /**
-   * 下载图谱 CSV 模板（管理员）
-   * GET /api/graph/csv-template
-   */
-  downloadCsvTemplate() {
-    return request({
-      url: '/graph/csv-template',
-      method: 'get',
-      responseType: 'blob'
-    })
-  }
 }

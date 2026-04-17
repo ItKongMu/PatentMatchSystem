@@ -6,16 +6,28 @@
         <h1 class="page-title">专利文献库</h1>
         <p class="page-desc">管理和浏览已录入系统的专利文献，支持全文检索和状态筛选</p>
       </div>
-      <el-button type="primary" class="upload-btn" @click="$router.push('/patent/upload')">
-        <el-icon>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-        </el-icon>
-        上传专利
-      </el-button>
+      <div class="header-actions">
+        <el-button @click="$router.push('/patent/import')">
+          <el-icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </el-icon>
+          CSV导入
+        </el-button>
+        <el-button type="primary" class="upload-btn" @click="$router.push('/patent/upload')">
+          <el-icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </el-icon>
+          上传专利
+        </el-button>
+      </div>
     </div>
     
     <!-- 统计卡片 -->
@@ -81,6 +93,55 @@
     
     <!-- 主内容卡片 -->
     <div class="card main-card">
+      <!-- 批量操作工具栏 -->
+      <transition name="batch-bar">
+        <div v-if="selectedRows.length > 0" class="batch-toolbar">
+          <div class="batch-info">
+            <el-icon class="batch-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 11 12 14 22 4"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+            </el-icon>
+            <span>已选择 <strong>{{ selectedRows.length }}</strong> 条专利</span>
+          </div>
+          <div class="batch-actions">
+            <el-button
+              type="success"
+              size="small"
+              :loading="batchProcessLoading"
+              :disabled="batchProcessableCount === 0"
+              @click="handleBatchProcess"
+            >
+              <el-icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+              </el-icon>
+              批量处理
+              <span v-if="batchProcessableCount > 0" class="count-badge">{{ batchProcessableCount }}</span>
+            </el-button>
+            <el-button
+              type="danger"
+              size="small"
+              :loading="batchDeleteLoading"
+              @click="handleBatchDelete"
+            >
+              <el-icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+              </el-icon>
+              批量删除
+            </el-button>
+            <el-button size="small" @click="clearSelection">取消选择</el-button>
+          </div>
+        </div>
+      </transition>
+
       <!-- 搜索和筛选 -->
       <div class="filter-section">
         <div class="search-box">
@@ -131,25 +192,28 @@
       
       <!-- 专利表格 -->
       <el-table
+        ref="tableRef"
         v-loading="loading"
         :data="patentList"
         class="patent-table"
         stripe
+        @selection-change="handleSelectionChange"
       >
-        <el-table-column prop="id" label="ID" width="70" align="center">
+        <el-table-column type="selection" width="46" align="center" />
+        <el-table-column prop="id" label="ID" width="96" align="center">
           <template #default="{ row }">
             <span class="id-badge">{{ row.id }}</span>
           </template>
         </el-table-column>
         
-        <el-table-column prop="publicationNo" label="公开号" width="140">
+        <el-table-column prop="publicationNo" label="公开号" width="195" align="center">
           <template #default="{ row }">
             <span v-if="row.publicationNo" class="patent-number">{{ row.publicationNo }}</span>
             <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
         
-        <el-table-column prop="title" label="专利标题" min-width="280">
+        <el-table-column prop="title" label="专利标题" min-width="200" align="center">
           <template #default="{ row }">
             <div class="title-cell">
               <el-link 
@@ -199,7 +263,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column prop="createdAt" label="创建时间" width="160" align="center">
+        <el-table-column prop="createdAt" label="创建时间" width="185" align="center">
           <template #default="{ row }">
             <span class="date-text">{{ formatDate(row.createdAt) }}</span>
           </template>
@@ -284,6 +348,10 @@ const patentList = ref([])
 const total = ref(0)
 const pollingTimer = ref(null)
 const POLLING_INTERVAL = 2000
+const tableRef = ref(null)
+const selectedRows = ref([])
+const batchProcessLoading = ref(false)
+const batchDeleteLoading = ref(false)
 
 const searchForm = reactive({
   keyword: '',
@@ -297,7 +365,10 @@ const pagination = reactive({
 
 const forcePolling = ref(false)
 const forcePollingCount = ref(0)
-const MAX_FORCE_POLLING_COUNT = 30
+// 强制轮询最多等待 15 次（30秒），等待处理任务出现
+const MAX_FORCE_POLLING_COUNT = 15
+// 如果 N 次内从未出现处理中状态，说明任务未启动，提前终止（避免无效轮询）
+const MAX_IDLE_POLLING_COUNT = 5
 const hadProcessingPatents = ref(false)
 
 // 统计数据
@@ -311,6 +382,75 @@ const pendingCount = computed(() =>
   patentList.value.filter(p => p.parseStatus === 'PENDING').length
 )
 
+// 批量操作相关
+const batchProcessableCount = computed(() =>
+  selectedRows.value.filter(r => r.parseStatus === 'PENDING' || r.parseStatus === 'FAILED').length
+)
+
+const handleSelectionChange = (rows) => {
+  selectedRows.value = rows
+}
+
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+const handleBatchProcess = async () => {
+  if (batchProcessableCount.value === 0) {
+    ElMessage.warning('所选专利中没有可处理的条目（仅待处理/失败状态可触发）')
+    return
+  }
+  const processableIds = selectedRows.value
+    .filter(r => r.parseStatus === 'PENDING' || r.parseStatus === 'FAILED')
+    .map(r => r.id)
+  try {
+    await ElMessageBox.confirm(
+      `将对 ${processableIds.length} 条专利触发处理流程（AI提取实体、向量化），是否继续？`,
+      '批量处理确认',
+      { type: 'info', confirmButtonText: '开始处理', cancelButtonText: '取消' }
+    )
+    batchProcessLoading.value = true
+    const res = await patentApi.batchProcess(processableIds)
+    if (res.code === 200) {
+      ElMessage.success(`已成功触发 ${res.data} 条专利的处理任务，可在列表实时查看进度`)
+      clearSelection()
+      await fetchList()
+      startPolling()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量处理失败:', error)
+    }
+  } finally {
+    batchProcessLoading.value = false
+  }
+}
+
+const handleBatchDelete = async () => {
+  const ids = selectedRows.value.map(r => r.id)
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${ids.length} 条专利吗？此操作不可恢复，将同时清除相关实体、向量和索引数据。`,
+      '批量删除确认',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+    )
+    batchDeleteLoading.value = true
+    const res = await patentApi.batchDelete(ids)
+    if (res.code === 200) {
+      ElMessage.success(`已成功删除 ${ids.length} 条专利`)
+      clearSelection()
+      fetchList()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量删除失败:', error)
+    }
+  } finally {
+    batchDeleteLoading.value = false
+  }
+}
+
 const hasProcessingPatents = computed(() => {
   const processingStatuses = ['PARSING', 'EXTRACTING', 'VECTORIZING']
   return patentList.value.some(p => processingStatuses.includes(p.parseStatus))
@@ -322,9 +462,15 @@ const shouldContinuePolling = computed(() => {
   }
   
   if (forcePolling.value) {
+    // 曾经出现过处理中状态，现在全部处理完了，停止
     if (hadProcessingPatents.value) {
       return false
     }
+    // 从未出现过处理中状态：若已达空闲轮询上限，提前停止（避免无效轮询）
+    if (forcePollingCount.value >= MAX_IDLE_POLLING_COUNT) {
+      return false
+    }
+    // 总轮询次数保护
     return forcePollingCount.value < MAX_FORCE_POLLING_COUNT
   }
   
@@ -586,10 +732,78 @@ onUnmounted(() => {
   }
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .upload-btn {
   height: 44px;
   padding: 0 var(--space-5);
   font-weight: var(--font-medium);
+}
+
+// 批量操作工具栏
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  background: linear-gradient(135deg, #eff6ff 0%, #e0f2fe 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-lg);
+
+  .batch-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-accent);
+    font-size: var(--text-sm);
+
+    .batch-icon {
+      font-size: 16px;
+    }
+
+    strong {
+      font-weight: var(--font-bold);
+      font-size: var(--text-base);
+    }
+  }
+
+  .batch-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+}
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-left: 4px;
+  background-color: rgba(255, 255, 255, 0.8);
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: var(--font-bold);
+  line-height: 1;
+}
+
+// 批量工具栏过渡动画
+.batch-bar-enter-active,
+.batch-bar-leave-active {
+  transition: all 0.25s ease;
+}
+
+.batch-bar-enter-from,
+.batch-bar-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 // 统计卡片
@@ -710,34 +924,38 @@ onUnmounted(() => {
 }
 
 .id-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 36px;
-  height: 24px;
-  padding: 0 var(--space-2);
+  display: inline-block;
+  padding: 2px 8px;
   background-color: var(--color-bg-tertiary);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   font-weight: var(--font-medium);
   color: var(--color-text-secondary);
+  line-height: 20px;
 }
 
 .patent-number {
+  display: inline-block;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
   color: var(--color-text-primary);
   background-color: var(--color-bg-tertiary);
-  padding: var(--space-1) var(--space-2);
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
 }
 
 .title-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
   .patent-link {
     font-weight: var(--font-medium);
     transition: color var(--duration-fast) var(--ease-default);
+    text-align: center;
     
     &:hover {
       color: var(--color-accent-dark);
@@ -749,6 +967,7 @@ onUnmounted(() => {
   margin-top: var(--space-1);
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-3);
 }
 
@@ -809,6 +1028,7 @@ onUnmounted(() => {
 .date-text {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 .text-muted {

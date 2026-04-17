@@ -19,6 +19,8 @@ import com.patent.service.GraphService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -45,6 +47,7 @@ public class PatentServiceImpl implements PatentService {
     private final PatentEntityMapper patentEntityMapper;
     private final PatentDomainMapper patentDomainMapper;
     private final PatentVectorMapper patentVectorMapper;
+    private final PatentFavoriteMapper patentFavoriteMapper;
     private final FileService fileService;
     private final VectorService vectorService;
     private final AuthService authService;
@@ -52,6 +55,14 @@ public class PatentServiceImpl implements PatentService {
     private final SearchService searchService;
     private final GraphService graphService;
     private final SysUserMapper sysUserMapper;
+
+    /**
+     * 自引用代理：解决同类内部直接调用 @Transactional 方法时 Spring AOP 代理失效的问题。
+     * 通过 @Lazy 避免循环依赖（ApplicationContext 初始化时延迟注入）。
+     */
+    @Autowired
+    @Lazy
+    private PatentServiceImpl self;
 
     @Override
     @Transactional
@@ -287,6 +298,7 @@ public class PatentServiceImpl implements PatentService {
         // 删除关联数据（MySQL 事务内）
         patentEntityMapper.deleteByPatentId(patentId);
         patentDomainMapper.deleteByPatentId(patentId);
+        patentFavoriteMapper.deleteByPatentId(patentId);
 
         // 删除MinIO文件（外部服务，失败不回滚）
         if (patent.getFilePath() != null) {
@@ -316,6 +328,97 @@ public class PatentServiceImpl implements PatentService {
         // 删除专利记录
         patentMapper.deleteById(patentId);
         log.info("专利删除成功: {}", patentId);
+    }
+
+    @Override
+    public int batchProcessPatents(List<Long> patentIds) {
+        Long currentUserId = getCurrentUserId();
+        boolean isAdmin = isAdminUser(currentUserId);
+        int successCount = 0;
+        for (Long patentId : patentIds) {
+            try {
+                Patent patent = patentMapper.selectById(patentId);
+                if (patent == null) {
+                    log.warn("批量处理：专利不存在, id={}", patentId);
+                    continue;
+                }
+                // 权限校验
+                if (!isAdmin && !currentUserId.equals(patent.getCreatedBy())) {
+                    log.warn("批量处理：无权限处理专利, id={}", patentId);
+                    continue;
+                }
+                // 只处理 PENDING / FAILED 状态
+                String status = patent.getParseStatus();
+                if (!"PENDING".equals(status) && !"FAILED".equals(status)) {
+                    log.info("批量处理：专利状态 {} 不可触发, id={}", status, patentId);
+                    continue;
+                }
+                patentProcessorService.processPatentAsync(patentId);
+                successCount++;
+            } catch (Exception e) {
+                log.error("批量处理：处理专利失败, id={}", patentId, e);
+            }
+        }
+        log.info("批量处理完成: 请求{}条, 成功触发{}条", patentIds.size(), successCount);
+        return successCount;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchDeletePatents(List<Long> patentIds) {
+        Long currentUserId = getCurrentUserId();
+        boolean isAdmin = isAdminUser(currentUserId);
+        for (Long patentId : patentIds) {
+            try {
+                Patent patent = patentMapper.selectById(patentId);
+                if (patent == null) {
+                    log.warn("批量删除：专利不存在, id={}", patentId);
+                    continue;
+                }
+                // 权限校验
+                if (!isAdmin && (patent.getCreatedBy() == null || !patent.getCreatedBy().equals(currentUserId))) {
+                    log.warn("批量删除：无权限删除专利, id={}", patentId);
+                    continue;
+                }
+                // 删除 Qdrant 向量
+                PatentVector vector = patentVectorMapper.selectByPatentId(patentId);
+                if (vector != null) {
+                    try {
+                        vectorService.deleteVector(vector.getVectorId());
+                    } catch (Exception e) {
+                        log.warn("批量删除：删除Qdrant向量失败, vectorId={}", vector.getVectorId(), e);
+                    }
+                    patentVectorMapper.deleteByPatentId(patentId);
+                }
+                patentEntityMapper.deleteByPatentId(patentId);
+                patentDomainMapper.deleteByPatentId(patentId);
+                patentFavoriteMapper.deleteByPatentId(patentId);
+                if (patent.getFilePath() != null) {
+                    try {
+                        fileService.deleteFile(patent.getFilePath());
+                    } catch (Exception e) {
+                        log.warn("批量删除：删除MinIO文件失败: {}", patent.getFilePath(), e);
+                    }
+                }
+                try {
+                    searchService.deleteFromEs(patentId);
+                } catch (Exception e) {
+                    log.warn("批量删除：从ES删除专利索引失败: {}", patentId, e);
+                }
+                if (patent.getPublicationNo() != null) {
+                    try {
+                        graphService.deletePatentGraph(patent.getPublicationNo());
+                    } catch (Exception e) {
+                        log.warn("批量删除：从Neo4j删除专利图谱失败: {}", patentId, e);
+                    }
+                }
+                patentMapper.deleteById(patentId);
+                log.info("批量删除：专利删除成功, id={}", patentId);
+            } catch (Exception e) {
+                log.error("批量删除：删除专利失败, id={}", patentId, e);
+            }
+        }
+        log.info("批量删除完成: 共{}条", patentIds.size());
     }
 
     /**
@@ -371,11 +474,12 @@ public class PatentServiceImpl implements PatentService {
         // 设置表头
         result.setHeaders(Arrays.asList("公开号", "标题", "申请人", "公开日期", "IPC分类", "摘要", "正文"));
         
-        // 设置消息
+        // 设置消息和 canImport 状态
+        // 修复：任何情况下都要根据 validCount 决定 canImport，而非只在 invalidCount>0 时才设置
+        result.setCanImport(validCount > 0);
         if (invalidCount > 0) {
-            result.setMessage(String.format("解析完成：共%d条数据，其中%d条有效，%d条无效", 
+            result.setMessage(String.format("解析完成：共%d条数据，其中%d条有效，%d条无效",
                     allData.size(), validCount, invalidCount));
-            result.setCanImport(validCount > 0);
         } else {
             result.setMessage(String.format("解析完成：共%d条有效数据", allData.size()));
         }
@@ -433,8 +537,9 @@ public class PatentServiceImpl implements PatentService {
             }
 
             try {
-                // 每条记录独立事务插入，互不影响
-                Long patentId = insertSinglePatent(dto, userId);
+                // 每条记录独立事务插入，互不影响。
+                // 必须通过 self 代理调用，否则同类内部自调用会绕过 Spring AOP，@Transactional 不生效。
+                Long patentId = self.insertSinglePatent(dto, userId);
                 result.addSuccess(patentId);
             } catch (Exception e) {
                 log.error("导入专利失败: {}", dto, e);
@@ -658,6 +763,11 @@ public class PatentServiceImpl implements PatentService {
             while ((line = reader.readLine()) != null) {
                 rowNum++;
                 
+                // 修复：去除 UTF-8 BOM 头（Windows Excel 导出的 CSV 首行常带 \uFEFF）
+                if (rowNum == 1 && line.startsWith("\uFEFF")) {
+                    line = line.substring(1);
+                }
+                
                 // 跳过空行
                 if (line.trim().isEmpty()) {
                     continue;
@@ -667,7 +777,7 @@ public class PatentServiceImpl implements PatentService {
                 if (isFirstLine) {
                     isFirstLine = false;
                     String lowerLine = line.toLowerCase();
-                    if (lowerLine.contains("标题") || lowerLine.contains("title") || 
+                    if (lowerLine.contains("标题") || lowerLine.contains("title") ||
                         lowerLine.contains("公开号") || lowerLine.contains("publication") ||
                         lowerLine.contains("摘要") || lowerLine.contains("abstract")) {
                         continue;

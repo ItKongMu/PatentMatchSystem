@@ -61,8 +61,7 @@
 
         <!-- 通用查询 -->
         <template v-else>
-          <el-select v-model="advancedForm.nodeType" placeholder="节点类型" class="query-select">
-            <el-option label="全部" value="" />
+          <el-select v-model="advancedForm.nodeType" placeholder="节点类型（必选）" class="query-select">
             <el-option label="专利 (Patent)" value="Patent" />
             <el-option label="实体 (Entity)" value="Entity" />
             <el-option label="IPC分类 (IPC)" value="IPC" />
@@ -71,7 +70,7 @@
           </el-select>
           <el-input
             v-model="advancedForm.keyword"
-            placeholder="关键词（可选）"
+            :placeholder="advancedKeywordPlaceholder"
             clearable
             class="query-input"
             @keyup.enter="handleQuery"
@@ -206,18 +205,6 @@
           </div>
         </div>
 
-        <!-- 管理员：CSV模板下载 -->
-        <div class="panel-section">
-          <h3 class="panel-title">管理工具</h3>
-          <el-button size="small" class="download-btn" @click="downloadTemplate">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            下载CSV导入模板
-          </el-button>
-        </div>
       </div>
     </div>
   </div>
@@ -247,7 +234,7 @@ const router = useRouter()
 const loading = ref(false)
 const queryMode = ref('patent')
 const queryInput = ref('')
-const advancedForm = ref({ nodeType: '', keyword: '', depth: 2 })
+const advancedForm = ref({ nodeType: 'Patent', keyword: '', depth: 2 })
 const selectedNode = ref(null)
 const chartRef = ref(null)   // ECharts canvas div
 const wrapRef = ref(null)    // graph-canvas-wrap div（用于 ResizeObserver）
@@ -256,6 +243,14 @@ let resizeObserver = null
 
 const graphData = ref({ nodes: [], links: [] })
 const hasData = computed(() => graphData.value.nodes.length > 0)
+
+// 通用查询关键词输入框占位符：有节点类型时可不填关键词
+const advancedKeywordPlaceholder = computed(() => {
+  if (advancedForm.value.nodeType) {
+    return `关键词（不填则浏览前25个${advancedForm.value.nodeType}节点）`
+  }
+  return '关键词'
+})
 
 // ---- 节点颜色配置 ----
 const NODE_COLORS = {
@@ -316,7 +311,8 @@ const getNodeSize = (label) => {
 const switchMode = (mode) => {
   queryMode.value = mode
   queryInput.value = ''
-  advancedForm.value = { nodeType: '', keyword: '', depth: 2 }
+  // 切换到通用查询时，默认选中 Patent 类型，方便用户直接点查询
+  advancedForm.value = { nodeType: mode === 'advanced' ? 'Patent' : '', keyword: '', depth: 2 }
 }
 
 const quickQuery = (mode, input) => {
@@ -333,7 +329,7 @@ const handleQuery = async () => {
     return
   }
   if (mode === 'advanced' && !advancedForm.value.nodeType && !advancedForm.value.keyword) {
-    ElMessage.warning('请至少选择节点类型或输入关键词')
+    ElMessage.warning('请至少选择一个节点类型')
     return
   }
 
@@ -351,8 +347,9 @@ const handleQuery = async () => {
     } else {
       res = await graphApi.queryGraph({
         nodeType: advancedForm.value.nodeType || null,
-        keyword: advancedForm.value.keyword || null,
-        depth: advancedForm.value.depth
+        keyword: advancedForm.value.keyword.trim() || null,
+        depth: advancedForm.value.depth,
+        limit: advancedForm.value.keyword.trim() ? 50 : 25
       })
     }
 
@@ -416,7 +413,7 @@ const expandNode = async (node) => {
 
 const resetGraph = () => {
   queryInput.value = ''
-  advancedForm.value = { nodeType: '', keyword: '', depth: 2 }
+  advancedForm.value = { nodeType: 'Patent', keyword: '', depth: 2 }
   selectedNode.value = null
   graphData.value = { nodes: [], links: [] }
   if (chartInstance) {
@@ -585,21 +582,6 @@ const viewPatentDetail = async (node) => {
     console.error('查询专利失败:', err)
     // 降级到搜索页
     router.push({ path: '/search', query: { keyword: publicationNo } })
-  }
-}
-
-// ---- CSV模板下载 ----
-const downloadTemplate = async () => {
-  try {
-    const res = await graphApi.downloadCsvTemplate()
-    const url = URL.createObjectURL(new Blob([res]))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'graph-import-template.zip'
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (err) {
-    ElMessage.error('模板下载失败')
   }
 }
 
@@ -981,11 +963,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-
-.download-btn {
-  width: 100%;
-  justify-content: center;
 }
 
 @media (max-width: 1024px) {

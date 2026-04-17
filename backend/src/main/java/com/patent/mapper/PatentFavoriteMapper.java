@@ -31,6 +31,12 @@ public interface PatentFavoriteMapper extends BaseMapper<PatentFavorite> {
     int deleteByUserAndPatent(@Param("userId") Long userId, @Param("patentId") Long patentId);
 
     /**
+     * 删除某专利的所有用户收藏记录（专利被删除时级联调用）
+     */
+    @Delete("DELETE FROM patent_favorite WHERE patent_id = #{patentId}")
+    int deleteByPatentId(@Param("patentId") Long patentId);
+
+    /**
      * 查询用户的收藏专利ID列表
      */
     @Select("SELECT patent_id FROM patent_favorite WHERE user_id = #{userId}")

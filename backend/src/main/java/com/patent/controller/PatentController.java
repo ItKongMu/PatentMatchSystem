@@ -143,4 +143,28 @@ public class PatentController {
             @Parameter(description = "是否自动处理") @RequestParam(value = "autoProcess", defaultValue = "false") Boolean autoProcess) {
         return Result.success("导入完成", patentService.importCsvData(dataList, autoProcess));
     }
+
+    @Operation(summary = "批量处理专利（触发处理流程）")
+    @SaCheckLogin
+    @PostMapping("/batch/process")
+    public Result<Integer> batchProcessPatents(
+            @Parameter(description = "专利ID列表") @RequestBody List<Long> patentIds) {
+        if (patentIds == null || patentIds.isEmpty()) {
+            return Result.error("请选择要处理的专利");
+        }
+        int count = patentService.batchProcessPatents(patentIds);
+        return Result.success("已提交处理任务 " + count + " 条", count);
+    }
+
+    @Operation(summary = "批量删除专利")
+    @SaCheckLogin
+    @DeleteMapping("/batch")
+    public Result<Void> batchDeletePatents(
+            @Parameter(description = "专利ID列表") @RequestBody List<Long> patentIds) {
+        if (patentIds == null || patentIds.isEmpty()) {
+            return Result.error("请选择要删除的专利");
+        }
+        patentService.batchDeletePatents(patentIds);
+        return Result.success("批量删除成功", null);
+    }
 }

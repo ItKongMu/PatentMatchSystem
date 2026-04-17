@@ -253,5 +253,32 @@ export const patentApi = {
       data: dataList,
       timeout: PATENT_API_CONFIG.CSV_IMPORT_TIMEOUT
     })
+  },
+
+  /**
+   * 批量处理专利
+   * @param {Array<number>} patentIds - 专利ID列表
+   * @returns {Promise<{code: number, message: string, data: number}>}
+   */
+  batchProcess(patentIds) {
+    return request({
+      url: '/patent/batch/process',
+      method: 'post',
+      data: patentIds,
+      timeout: PATENT_API_CONFIG.PROCESS_TIMEOUT
+    })
+  },
+
+  /**
+   * 批量删除专利
+   * @param {Array<number>} patentIds - 专利ID列表
+   * @returns {Promise<{code: number, message: string, data: null}>}
+   */
+  batchDelete(patentIds) {
+    return request({
+      url: '/patent/batch',
+      method: 'delete',
+      data: patentIds
+    })
   }
 }

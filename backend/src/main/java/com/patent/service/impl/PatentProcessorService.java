@@ -591,6 +591,10 @@ public class PatentProcessorService {
      *
      * <p>修复：重复处理（手动触发 /process/{id}）时，先清除旧的实体和领域记录，
      * 避免数据重复叠加，导致向量文本越来越长、检索噪声增大。</p>
+     *
+     * <p>正文优先策略：若专利在 MinIO 中存有完整正文文件，则优先读取正文内容
+     * 作为 LLM 输入（通过智能截取保证不超 Token 上限），以获得更准确的实体/领域提取效果；
+     * 若 MinIO 读取失败或正文为空，则降级为仅使用标题 + 摘要。</p>
      */
     @Transactional
     public void extractEntitiesAndDomains(Patent patent) {
@@ -603,10 +607,8 @@ public class PatentProcessorService {
             log.info("清除旧实体/领域数据: patentId={}, entities={}, domains={}", patentId, deletedEntities, deletedDomains);
         }
 
-        // 构造专利文本（标题 + 摘要）
-        String patentText = String.format("标题：%s\n摘要：%s",
-                patent.getTitle() != null ? patent.getTitle() : "",
-                patent.getPatentAbstract() != null ? patent.getPatentAbstract() : "");
+        // 构造专利文本：优先使用 MinIO 全文，降级为标题 + 摘要
+        String patentText = buildPatentTextForExtraction(patent);
 
         // 调用LLM提取
         LlmService.PatentAnalysisResult result = llmService.extractEntitiesAndDomain(patentText);
@@ -665,6 +667,61 @@ public class PatentProcessorService {
     private String truncateString(String str, int maxLength) {
         if (str == null) return null;
         return str.length() > maxLength ? str.substring(0, maxLength) : str;
+    }
+
+    /**
+     * 构建用于 LLM 实体/领域提取的专利文本。
+     *
+     * <p>策略（优先级从高到低）：
+     * <ol>
+     *   <li>若专利在 MinIO 中存有完整正文文件（{@code filePath != null}），读取全文并与
+     *       标题/摘要拼接，以给 LLM 提供更丰富的上下文；</li>
+     *   <li>若 MinIO 读取失败（文件缺失/IO 异常），降级为仅使用标题 + 摘要，并记录警告日志。</li>
+     * </ol>
+     * 返回的文本由 {@link LlmService#extractEntitiesAndDomain(String)} 内部的
+     * {@code truncateTextSmartly} 按首70%+尾30%策略截断，不会超过 Token 上限。</p>
+     *
+     * @param patent 待处理专利（已从数据库加载）
+     * @return 组合后的文本字符串，至少包含标题和摘要
+     */
+    private String buildPatentTextForExtraction(Patent patent) {
+        String title    = patent.getTitle()          != null ? patent.getTitle()          : "";
+        String abstract_ = patent.getPatentAbstract() != null ? patent.getPatentAbstract() : "";
+
+        // 基础文本：标题 + 摘要（MinIO 读取失败时的兜底）
+        String baseText = String.format("标题：%s\n摘要：%s", title, abstract_);
+
+        if (patent.getFilePath() == null || patent.getFilePath().isBlank()) {
+            log.info("专利 {} 无正文文件路径，使用标题+摘要进行实体提取（总长度: {} 字符）",
+                    patent.getId(), baseText.length());
+            return baseText;
+        }
+
+        // 尝试从 MinIO 读取完整正文
+        try (InputStream is = fileService.getFile(patent.getFilePath());
+             BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            String fullText = sb.toString().trim();
+
+            if (fullText.isBlank()) {
+                log.warn("专利 {} 的正文文件内容为空，降级使用标题+摘要", patent.getId());
+                return baseText;
+            }
+
+            String combined = String.format("标题：%s\n摘要：%s\n正文：%s", title, abstract_, fullText);
+            log.info("专利 {} 使用 MinIO 全文进行实体提取（总长度: {} 字符，原文: {} 字符）",
+                    patent.getId(), combined.length(), fullText.length());
+            return combined;
+
+        } catch (Exception e) {
+            log.warn("专利 {} 读取 MinIO 正文失败，降级使用标题+摘要: {}", patent.getId(), e.getMessage());
+            return baseText;
+        }
     }
 
     /**

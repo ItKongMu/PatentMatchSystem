@@ -2,9 +2,9 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.patent.mapper.MatchRecordMapper">
 
-    <!-- 分页查询匹配记录 -->
-    <select id="selectMatchRecordPage" resultType="com.patent.model.entity.MatchRecord">
-        SELECT *
+    <!-- 统计用户session总数（按 session_id 去重） -->
+    <select id="countSessionByUser" resultType="long">
+        SELECT COUNT(DISTINCT session_id)
         FROM match_record
         <where>
             <if test="userId != null">
@@ -13,8 +13,63 @@
             <if test="matchMode != null and matchMode != ''">
                 AND match_mode = #{matchMode}
             </if>
+            AND session_id IS NOT NULL
         </where>
-        ORDER BY created_at DESC
+    </select>
+
+    <!-- 按session聚合查询历史列表 -->
+    <select id="selectSessionList" resultType="com.patent.model.vo.MatchSessionVO">
+        SELECT
+            session_id                   AS sessionId,
+            match_mode                   AS matchMode,
+            CASE
+                WHEN match_mode = 'TEXT'    THEN query_text
+                WHEN match_mode = 'PATENT'  THEN source_patent_title
+                ELSE query_text
+            END                          AS querySource,
+            source_patent_id             AS sourcePatentId,
+            top_k                        AS topK,
+            COUNT(*)                     AS matchCount,
+            MIN(created_at)              AS createdAt
+        FROM match_record
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="matchMode != null and matchMode != ''">
+                AND match_mode = #{matchMode}
+            </if>
+            AND session_id IS NOT NULL
+        </where>
+        GROUP BY session_id, match_mode, query_text, source_patent_title, source_patent_id, top_k
+        ORDER BY createdAt DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 查询某session的前N条匹配摘要（相似度最高的），增加 user_id 过滤防止跨用户访问 -->
+    <select id="selectTopMatchesBySession" resultType="com.patent.model.vo.MatchSessionVO$MatchItemSummary">
+        SELECT
+            target_patent_id      AS targetPatentId,
+            target_patent_title   AS targetPatentTitle,
+            similarity_score      AS similarityScore
+        FROM match_record
+        WHERE session_id = #{sessionId}
+        <if test="userId != null">
+            AND user_id = #{userId}
+        </if>
+        ORDER BY similarity_score DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 查询某session下所有匹配记录 -->
+    <select id="selectBySessionId" resultType="com.patent.model.entity.MatchRecord">
+        SELECT *
+        FROM match_record
+        WHERE session_id = #{sessionId}
+        <if test="userId != null">
+            AND user_id = #{userId}
+        </if>
+        ORDER BY similarity_score DESC
     </select>
 
 </mapper>
