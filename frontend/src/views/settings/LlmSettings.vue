@@ -74,7 +74,7 @@
         <el-card shadow="never" class="table-card">
           <el-table :data="systemConfigs" row-key="id" stripe class="config-table">
             <!-- 配置名称（含状态指示） -->
-            <el-table-column label="配置名称" min-width="200">
+            <el-table-column label="配置名称" min-width="200" header-align="center">
               <template #default="{ row }">
                 <div class="name-cell">
                   <el-icon v-if="row.isActive" class="row-active-icon"><CircleCheckFilled /></el-icon>
@@ -100,14 +100,14 @@
             </el-table-column>
 
             <!-- 地址/URL -->
-            <el-table-column label="接入地址" min-width="180">
+            <el-table-column label="接入地址" min-width="180" header-align="center">
               <template #default="{ row }">
                 <span class="url-text">{{ row.llmMode === 'online' ? row.baseUrl : row.ollamaUrl }}</span>
               </template>
             </el-table-column>
 
             <!-- 模型 -->
-            <el-table-column label="模型配置" min-width="220">
+            <el-table-column label="模型配置" min-width="220" header-align="center">
               <template #default="{ row }">
                 <div class="model-tags-cell">
                   <el-tag v-if="row.chatModel" size="small" effect="plain" type="primary">对话: {{ row.chatModel }}</el-tag>
@@ -117,7 +117,7 @@
             </el-table-column>
 
             <!-- API Key -->
-            <el-table-column label="API Key" width="210">
+            <el-table-column label="API Key" width="210" header-align="center">
               <template #default="{ row }">
                 <template v-if="row.llmMode === 'online'">
                   <div v-if="row.hasApiKey" class="apikey-inline">
@@ -151,10 +151,10 @@
             <el-table-column label="操作" width="160" align="center" fixed="right">
               <template #default="{ row }">
                 <div class="action-btns" @click.stop>
-                  <el-button v-if="!row.isActive" size="small" type="primary" @click="handleActivate(row)">激活</el-button>
+                  <el-button v-if="!row.isActive" size="small" type="primary" link @click="handleActivate(row)">激活</el-button>
                   <template v-if="isAdmin">
-                    <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
-                    <el-button size="small" type="danger" plain :disabled="row.isActive" @click="handleDelete(row)">删除</el-button>
+                    <el-button size="small" link @click="openEditDialog(row)">编辑</el-button>
+                    <el-button size="small" type="danger" link :disabled="row.isActive" @click="handleDelete(row)">删除</el-button>
                   </template>
                   <el-tag v-else size="small" type="info" effect="plain">只读</el-tag>
                 </div>
@@ -183,7 +183,7 @@
           <el-empty v-if="userConfigs.length === 0 && !loading" description="暂无自定义配置，点击右上角「新增配置」添加" :image-size="80" />
           <el-table v-else :data="userConfigs" row-key="id" stripe class="config-table">
             <!-- 配置名称（含状态指示） -->
-            <el-table-column label="配置名称" min-width="200">
+            <el-table-column label="配置名称" min-width="200" header-align="center">
               <template #default="{ row }">
                 <div class="name-cell">
                   <el-icon v-if="row.isActive" class="row-active-icon"><CircleCheckFilled /></el-icon>
@@ -209,14 +209,14 @@
             </el-table-column>
 
             <!-- 地址/URL -->
-            <el-table-column label="接入地址" min-width="180">
+            <el-table-column label="接入地址" min-width="180" header-align="center">
               <template #default="{ row }">
                 <span class="url-text">{{ row.llmMode === 'online' ? row.baseUrl : row.ollamaUrl }}</span>
               </template>
             </el-table-column>
 
             <!-- 模型 -->
-            <el-table-column label="模型配置" min-width="220">
+            <el-table-column label="模型配置" min-width="220" header-align="center">
               <template #default="{ row }">
                 <div class="model-tags-cell">
                   <el-tag v-if="row.chatModel" size="small" effect="plain" type="primary">对话: {{ row.chatModel }}</el-tag>
@@ -226,7 +226,7 @@
             </el-table-column>
 
             <!-- API Key -->
-            <el-table-column label="API Key" width="210">
+            <el-table-column label="API Key" width="210" header-align="center">
               <template #default="{ row }">
                 <template v-if="row.llmMode === 'online'">
                   <div v-if="row.hasApiKey" class="apikey-inline">
@@ -259,9 +259,9 @@
             <el-table-column label="操作" width="160" align="center" fixed="right">
               <template #default="{ row }">
                 <div class="action-btns" @click.stop>
-                  <el-button v-if="!row.isActive" size="small" type="primary" @click="handleActivate(row)">激活</el-button>
-                  <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
-                  <el-button size="small" type="danger" plain :disabled="row.isActive" @click="handleDelete(row)">删除</el-button>
+                  <el-button v-if="!row.isActive" size="small" type="primary" link @click="handleActivate(row)">激活</el-button>
+                  <el-button size="small" link @click="openEditDialog(row)">编辑</el-button>
+                  <el-button size="small" type="danger" link :disabled="row.isActive" @click="handleDelete(row)">删除</el-button>
                 </div>
               </template>
             </el-table-column>
@@ -868,6 +868,24 @@ onMounted(loadData)
   :deep(.el-table__row:hover) td {
     background: var(--color-bg-secondary);
   }
+
+  :deep(.el-table__header-wrapper) th {
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+}
+
+// ========== 操作按钮（link 风格，行内排列） ==========
+.action-btns {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex-wrap: nowrap;
 }
 
 // ========== 表格单元格样式 ==========

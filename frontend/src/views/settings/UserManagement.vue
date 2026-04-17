@@ -64,34 +64,36 @@
       </div>
     </div>
 
-    <!-- 搜索栏 -->
-    <div class="toolbar">
-      <el-input
-        v-model="searchKeyword"
-        placeholder="搜索昵称或用户名..."
-        clearable
-        style="width: 280px"
-      >
-        <template #prefix>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-        </template>
-      </el-input>
-      <el-select v-model="filterRole" placeholder="筛选角色" clearable style="width: 130px">
-        <el-option label="全部" value="" />
-        <el-option label="管理员" value="admin" />
-        <el-option label="普通用户" value="user" />
-      </el-select>
-      <el-select v-model="filterStatus" placeholder="筛选状态" clearable style="width: 130px">
-        <el-option label="全部" value="" />
-        <el-option label="启用" value="1" />
-        <el-option label="禁用" value="0" />
-      </el-select>
-    </div>
-
     <!-- 用户列表表格 -->
-    <el-card shadow="never" class="table-card">
+    <div class="card main-card">
+      <!-- 搜索和筛选 -->
+      <div class="filter-section">
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索昵称或用户名..."
+          clearable
+          class="search-box"
+        >
+          <template #prefix>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </template>
+        </el-input>
+        <div class="filter-group">
+          <el-select v-model="filterRole" placeholder="筛选角色" clearable class="filter-select">
+            <el-option label="全部" value="" />
+            <el-option label="管理员" value="admin" />
+            <el-option label="普通用户" value="user" />
+          </el-select>
+          <el-select v-model="filterStatus" placeholder="筛选状态" clearable class="filter-select">
+            <el-option label="全部" value="" />
+            <el-option label="启用" value="1" />
+            <el-option label="禁用" value="0" />
+          </el-select>
+        </div>
+      </div>
+
       <el-table
         :data="filteredUsers"
         v-loading="tableLoading"
@@ -101,7 +103,7 @@
         @row-click="openDrawer"
       >
         <!-- 昵称 -->
-        <el-table-column label="昵称" min-width="120">
+        <el-table-column label="昵称" min-width="130">
           <template #default="{ row }">
             <div class="user-cell">
               <el-avatar :size="32" class="table-avatar">
@@ -113,14 +115,14 @@
         </el-table-column>
 
         <!-- 用户名 -->
-        <el-table-column label="用户名" prop="username" min-width="120">
+        <el-table-column label="用户名" prop="username" min-width="90" align="center">
           <template #default="{ row }">
             <span class="cell-username">@{{ row.username }}</span>
           </template>
         </el-table-column>
 
         <!-- 角色 -->
-        <el-table-column label="角色" width="100" align="center">
+        <el-table-column label="角色" width="120" align="center">
           <template #default="{ row }">
             <el-tag :type="row.role === 'admin' ? 'danger' : 'primary'" size="small" effect="plain">
               {{ row.role === 'admin' ? '管理员' : '用户' }}
@@ -129,11 +131,12 @@
         </el-table-column>
 
         <!-- 状态 -->
-        <el-table-column label="状态" width="90" align="center">
+        <el-table-column label="账号状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-              {{ row.status === 1 ? '启用' : '禁用' }}
-            </el-tag>
+            <div class="status-cell">
+              <span class="status-dot" :class="row.status === 1 ? 'success' : 'disabled'"></span>
+              <span class="status-text">{{ row.status === 1 ? '启用' : '禁用' }}</span>
+            </div>
           </template>
         </el-table-column>
 
@@ -145,108 +148,67 @@
         </el-table-column>
 
         <!-- 注册时间 -->
-        <el-table-column label="注册时间" min-width="160">
+        <el-table-column label="注册时间" width="175" align="center">
           <template #default="{ row }">
             <span class="cell-time">{{ formatTime(row.createdAt) }}</span>
           </template>
         </el-table-column>
 
-        <!-- 专利数 -->
-        <el-table-column label="专利" width="70" align="center">
+        <!-- 专利/匹配/收藏 合并为数据列 -->
+        <el-table-column label="专利" width="90" align="center">
           <template #default="{ row }">
             <span class="cell-count">{{ row.patentCount ?? 0 }}</span>
           </template>
         </el-table-column>
-
-        <!-- 匹配次数 -->
-        <el-table-column label="匹配" width="70" align="center">
+        <el-table-column label="匹配" width="90" align="center">
           <template #default="{ row }">
             <span class="cell-count">{{ row.matchCount ?? 0 }}</span>
           </template>
         </el-table-column>
-
-        <!-- 收藏数 -->
-        <el-table-column label="收藏" width="70" align="center">
+        <el-table-column label="收藏" width="90" align="center">
           <template #default="{ row }">
             <span class="cell-count">{{ row.favoriteCount ?? 0 }}</span>
           </template>
         </el-table-column>
 
         <!-- 操作列 -->
-        <el-table-column label="操作" width="220" align="center" fixed="right">
+        <el-table-column label="操作" width="240" align="center" fixed="right">
           <template #default="{ row }">
             <div class="action-btns" @click.stop>
-              <!-- 踢出 -->
-              <el-tooltip content="踢出登录" placement="top">
-                <el-button
-                  size="small"
-                  :disabled="!row.online || row.id === currentUserId || kickoutLoading"
-                  :loading="kickoutLoading && drawerUser?.id === row.id"
-                  @click="handleKickout(row)"
-                  circle
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                    <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-                  </svg>
-                </el-button>
-              </el-tooltip>
+              <el-button
+                size="small"
+                link
+                :disabled="!row.online || row.id === currentUserId || kickoutLoading"
+                @click="handleKickout(row)"
+              >踢出</el-button>
 
-              <!-- 禁用/启用 -->
-              <el-tooltip :content="row.status === 1 ? '禁用账号' : '启用账号'" placement="top">
-                <el-button
-                  size="small"
-                  :type="row.status === 1 ? 'warning' : 'success'"
-                  :disabled="row.id === currentUserId || statusLoading"
-                  @click="handleToggleStatus(row)"
-                  circle
-                  plain
-                >
-                  <svg v-if="row.status === 1" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-                  </svg>
-                  <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                </el-button>
-              </el-tooltip>
+              <el-button
+                size="small"
+                :type="row.status === 1 ? 'warning' : 'success'"
+                link
+                :disabled="row.id === currentUserId || statusLoading"
+                @click="handleToggleStatus(row)"
+              >{{ row.status === 1 ? '禁用' : '启用' }}</el-button>
 
-              <!-- 角色切换 -->
-              <el-tooltip :content="row.role === 'admin' ? '降为普通用户' : '提升为管理员'" placement="top">
-                <el-button
-                  size="small"
-                  :type="row.role === 'admin' ? 'danger' : 'primary'"
-                  :disabled="row.id === currentUserId || roleLoading"
-                  @click="handleToggleRole(row)"
-                  circle
-                  plain
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                  </svg>
-                </el-button>
-              </el-tooltip>
+              <el-button
+                size="small"
+                :type="row.role === 'admin' ? 'danger' : 'primary'"
+                link
+                :disabled="row.id === currentUserId || roleLoading"
+                @click="handleToggleRole(row)"
+              >{{ row.role === 'admin' ? '降权' : '提权' }}</el-button>
 
-              <!-- 重置密码 -->
-              <el-tooltip content="重置密码" placement="top">
-                <el-button
-                  size="small"
-                  type="info"
-                  @click="openResetDialog(row)"
-                  circle
-                  plain
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                    <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
-                  </svg>
-                </el-button>
-              </el-tooltip>
+              <el-button
+                size="small"
+                type="info"
+                link
+                @click="openResetDialog(row)"
+              >重置密码</el-button>
             </div>
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </div>
 
     <!-- 用户详情抽屉 -->
     <el-drawer
@@ -753,23 +715,51 @@ onMounted(() => {
   }
 }
 
-// 工具栏
-.toolbar {
+// 主表格卡片（参照PatentList样式）
+.main-card {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+}
+
+// 搜索和筛选区域
+.filter-section {
   display: flex;
+  align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
   flex-wrap: wrap;
 }
 
-// 表格
-.table-card {
-  :deep(.el-card__body) { padding: 0; }
+.search-box {
+  width: 280px;
+  flex-shrink: 0;
 }
 
+.filter-group {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.filter-select {
+  width: 128px;
+}
+
+// 表格
 .user-table {
   width: 100%;
   cursor: pointer;
   :deep(.el-table__row:hover) td { background: var(--color-bg-secondary); }
+  :deep(.el-table__header-wrapper) th {
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
 }
 
 .user-cell {
@@ -808,6 +798,30 @@ onMounted(() => {
   color: var(--color-text-primary);
 }
 
+// 账号状态（带彩点，参照PatentList状态列）
+.status-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+
+  .status-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &.success  { background: #10b981; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2); }
+    &.disabled { background: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15); }
+  }
+
+  .status-text {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+}
+
 // 在线状态圆点
 .online-dot {
   display: inline-block;
@@ -822,8 +836,10 @@ onMounted(() => {
 // 操作按钮
 .action-btns {
   display: flex;
+  align-items: center;
   justify-content: center;
   gap: var(--space-1);
+  flex-wrap: nowrap;
 }
 
 // 抽屉
