@@ -1,9 +1,9 @@
-# Docker环境配置
+# Docker 环境配置（容器间通过服务名通信）
 spring:
   datasource:
     url: jdbc:mysql://mysql:3306/patent_match_system?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
-    password: ${MYSQL_PASSWORD:280054}
+    password: ${MYSQL_PASSWORD:123}
 
   data:
     redis:
@@ -12,22 +12,34 @@ spring:
       password: ${REDIS_PASSWORD:}
     elasticsearch:
       uris: http://elasticsearch:9200
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://root:280054@mongodb:27017/patent_chat?authSource=admin}
+
+  neo4j:
+    uri: ${NEO4J_URI:bolt://neo4j:7687}
+    authentication:
+      username: ${NEO4J_USERNAME:neo4j}
+      password: ${NEO4J_PASSWORD:neo4j280054}
 
   ai:
-    dashscope:
-      api-key: ${DASHSCOPE_API_KEY}
+    openai:
+      base-url: ${ONLINE_API_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      api-key: ${ONLINE_API_KEY:${DASH_SCOPE_API_KEY:placeholder}}
+      connect-timeout: 60s
+      read-timeout: 120s
     ollama:
-      base-url: http://ollama:11434
+      base-url: ${OLLAMA_BASE_URL:http://ollama:11434}
     vectorstore:
       qdrant:
-        host: qdrant
-        port: 6334
+        host: ${QDRANT_HOST:qdrant}
+        port: ${QDRANT_PORT:6334}
+        api-key: ${QDRANT_API_KEY:otqozwqtj4abdu6hsvtgjghw4h2qyoxu}
 
 minio:
-  endpoint: http://minio:9000
+  endpoint: ${MINIO_ENDPOINT:http://minio:9000}
   access-key: ${MINIO_ACCESS_KEY:admin}
   secret-key: ${MINIO_SECRET_KEY:admin280054}
-  bucket-name: patent-files
+  bucket-name: ${MINIO_BUCKET:patent-files}
 
 patent:
   llm-mode: ${LLM_MODE:online}

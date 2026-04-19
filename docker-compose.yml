@@ -1,156 +1,217 @@
 version: '3.8'
 
+# ============================================================
+# 专利技术匹配系统 - 一键启动配置
+# 网络统一使用: patent
+# 所有密码/参数与 application.yml 保持一致
+# ============================================================
+
 services:
-  # MySQL数据库
+
+  # ── MySQL 8.0 关系型数据库 ───────────────────────────────
   mysql:
     image: mysql:8.0
-    container_name: patent-mysql
+    container_name: mysql
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: patent_db
       TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: 123
+      MYSQL_DATABASE: patent_match_system
     ports:
       - "3306:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./backend/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/init.sql
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      - /root/mysql/data:/var/lib/mysql
+      - /root/mysql/conf:/etc/mysql/conf.d
+      - /root/mysql/init:/docker-entrypoint-initdb.d
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
     networks:
-      - patent-network
+      - patent
 
-  # Redis缓存
+  # ── Redis 7 缓存 ─────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: patent-redis
+    container_name: redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - redis-data:/data
+    command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - patent-network
+      - patent
 
-  # Elasticsearch搜索引擎
+  # ── Elasticsearch 8.12.2 全文检索 ────────────────────────
   elasticsearch:
-    image: elasticsearch:8.12.0
-    container_name: patent-elasticsearch
+    image: elasticsearch:8.12.2
+    container_name: es
+    restart: unless-stopped
     environment:
+      - TZ=Asia/Shanghai
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enrollment.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
     ports:
       - "9200:9200"
       - "9300:9300"
     volumes:
-      - es_data:/usr/share/elasticsearch/data
+      - es-data:/usr/share/elasticsearch/data
+      - es-plugins:/usr/share/elasticsearch/plugins
+    privileged: true
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 60s
     networks:
-      - patent-network
+      - patent
 
-  # Qdrant向量数据库
-  qdrant:
-    image: qdrant/qdrant:v1.8.0
-    container_name: patent-qdrant
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    networks:
-      - patent-network
-
-  # MinIO对象存储
+  # ── MinIO 对象存储 ────────────────────────────────────────
   minio:
     image: minio/minio:latest
-    container_name: patent-minio
+    container_name: minio
+    restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin280054
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/data
+      - /data/minio/data:/data
+      - /data/minio/config:/root/.minio
+    command: server /data --console-address ":9001" --address ":9000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 20s
     networks:
-      - patent-network
+      - patent
 
-  # MongoDB 聊天历史存储
-  mongodb:
-    image: mongo:7.0
-    container_name: patent-mongodb
-    restart: always
+  # ── Qdrant 向量数据库（带 API Key 认证）─────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
     ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: patent_mongo_pwd
-      MONGO_INITDB_DATABASE: patent_chat
+      - "6333:6333"
+      - "6334:6334"
     volumes:
-      - mongodb_data:/data/db
-      - ./mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT_API_KEY=otqozwqtj4abdu6hsvtgjghw4h2qyoxu
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
     networks:
-      - patent-network
+      - patent
 
-  # Ollama本地LLM（离线模式，可选）
-  ollama:
-    image: ollama/ollama:latest
-    container_name: patent-ollama
+  # ── Neo4j 知识图谱数据库 ──────────────────────────────────
+  neo4j:
+    image: neo4j:latest
+    container_name: neo4j
+    restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "7474:7474"
+      - "7687:7687"
     volumes:
-      - ollama_data:/root/.ollama
-    profiles:
-      - offline
+      - /var/lib/docker/volumes/neo4j/data:/data
+      - /var/lib/docker/volumes/neo4j/logs:/logs
+      - /var/lib/docker/volumes/neo4j/import:/var/lib/neo4j/import
+      - /var/lib/docker/volumes/neo4j/plugins:/plugins
+    environment:
+      - NEO4J_AUTH=neo4j/neo4j280054
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     networks:
-      - patent-network
+      - patent
 
-  # 后端服务
+  # ── MongoDB 7 聊天历史存储 ────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: 280054
+      MONGO_INITDB_DATABASE: patent_chat
+    volumes:
+      - mongodb-data:/data/db
+      - ./backend/src/main/resources/db/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - patent
+
+  # ── Spring Boot 后端服务 ──────────────────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: patent-backend:latest
     container_name: patent-backend
+    restart: unless-stopped
     environment:
       - SPRING_PROFILES_ACTIVE=docker
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
-      - LLM_MODE=${LLM_MODE:-online}
+      # MySQL
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306
-      - MYSQL_PASSWORD=root
+      - MYSQL_PASSWORD=280054
+      # Redis
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      # Elasticsearch
       - ES_URIS=http://elasticsearch:9200
+      # Qdrant
       - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - QDRANT_API_KEY=otqozwqtj4abdu6hsvtgjghw4h2qyoxu
+      # MinIO
       - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=admin280054
+      # MongoDB
       - MONGODB_URI=mongodb://root:patent_mongo_pwd@mongodb:27017/patent_chat?authSource=admin
+      # Neo4j
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=neo4j280054
+      # LLM (在线模式，填写真实 API Key)
+      - LLM_MODE=online
+      - ONLINE_API_KEY=${DASH_SCOPE_API_KEY:-}
+      - ONLINE_API_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode
     ports:
       - "8080:8080"
     depends_on:
@@ -166,18 +227,30 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
+      neo4j:
+        condition: service_healthy
     networks:
-      - patent-network
+      - patent
 
+# ============================================================
+# 命名数据卷（Elasticsearch、Qdrant、Redis、MongoDB）
+# MySQL/MinIO/Neo4j 使用宿主机目录挂载，保持与手动部署一致
+# ============================================================
 volumes:
-  mysql_data:
-  redis_data:
-  es_data:
-  qdrant_data:
-  minio_data:
-  ollama_data:
-  mongodb_data:
+  es-data:
+    external: true          # 复用手动 docker run 创建的同名卷
+  es-plugins:
+    external: true
+  qdrant-data:
+    external: true
+  redis-data:
+    name: redis-data        # 新建（手动部署中用的是同名卷）
+  mongodb-data:
+    name: mongodb-data      # 新建（手动部署中用的是 mongo-data，名称不同，见注意事项）
 
+# ============================================================
+# 网络：统一使用 patent 网络（已在虚拟机上手动创建）
+# ============================================================
 networks:
-  patent-network:
-    driver: bridge
+  patent:
+    external: true          # 复用已存在的 patent 网络

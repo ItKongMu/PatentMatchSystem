@@ -113,6 +113,13 @@ spring:
         max-interval: 30000       # 最长等待 30s，防止无限等待
       on-client-errors: false     # 4xx 不重试（参数错误重试无意义）
 
+# MinIO配置
+minio:
+  endpoint: ${MINIO_ENDPOINT:192.168.65.131:9000}
+  access-key: ${MINIO_ACCESS_KEY:admin}
+  secret-key: ${MINIO_SECRET_KEY:admin280054}
+  bucket-name: ${MINIO_BUCKET:patent-files}
+  
 # MyBatis-Plus配置
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -136,13 +143,6 @@ sa-token:
   is-share: true
   token-style: uuid
   is-log: true
-
-# MinIO配置
-minio:
-  endpoint: ${MINIO_ENDPOINT:192.168.65.131:9000}
-  access-key: ${MINIO_ACCESS_KEY:admin}
-  secret-key: ${MINIO_SECRET_KEY:admin280054}
-  bucket-name: ${MINIO_BUCKET:patent-files}
 
 # ── 专利系统核心配置 ───────────────────────────────────────────────────────
 patent:

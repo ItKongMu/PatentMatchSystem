@@ -50,9 +50,9 @@ public class Neo4jConfig {
     @PostConstruct
     public void initNeo4jConstraints() {
         try {
-            ClassPathResource resource = new ClassPathResource("db/neo4j-constraints.cypher");
+            ClassPathResource resource = new ClassPathResource("db/neo4j-init.cypher");
             if (!resource.exists()) {
-                log.warn("Neo4j 约束脚本不存在: db/neo4j-constraints.cypher，跳过初始化");
+                log.warn("Neo4j 约束脚本不存在: db/neo4j-init.cypher，跳过初始化");
                 return;
             }
 

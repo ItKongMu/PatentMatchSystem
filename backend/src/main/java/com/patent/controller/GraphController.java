@@ -1,4 +1,4 @@
-npackage com.patent.controller;
+package com.patent.controller;
 
 import com.patent.common.Result;
 import com.patent.model.dto.GraphQueryDTO;

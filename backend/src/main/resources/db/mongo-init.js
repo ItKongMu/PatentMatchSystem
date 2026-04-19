@@ -1,34 +1,35 @@
-// MongoDB 初始化脚本
-// 创建聊天历史数据库和索引
+// MongoDB 初始化脚本 - 专利匹配系统聊天模块
+// 自动创建数据库、集合、索引、权限
 
-// 切换到 patent_chat 数据库
+// 1. 切换到专利聊天数据库
 db = db.getSiblingDB('patent_chat');
 
-// 创建应用用户（可选，如果需要单独的应用用户）
-// db.createUser({
-//   user: 'patent_user',
-//   pwd: 'patent_pwd',
-//   roles: [{ role: 'readWrite', db: 'patent_chat' }]
-// });
+// 2. 创建专用账号（Docker 启动时自动授权，必须加！）
+db.createUser({
+  user: "root",
+  pwd: "280054",
+  roles: [
+    { role: "readWrite", db: "patent_chat" }
+  ]
+});
 
-// 创建 chat_sessions 集合索引
-db.chat_sessions.createIndex({ "userId": 1, "updatedAt": -1 }, { name: "user_updated_idx" });
-db.chat_sessions.createIndex({ "sessionId": 1 }, { unique: true, name: "session_id_idx" });
-db.chat_sessions.createIndex({ "userId": 1, "status": 1 }, { name: "user_status_idx" });
+// 3. 会话集合索引（保证查询速度）
+db.chat_sessions.createIndex({ "userId": 1, "updatedAt": -1 });
+db.chat_sessions.createIndex({ "sessionId": 1 }, { unique: true });
+db.chat_sessions.createIndex({ "userId": 1, "status": 1 });
 
-// 创建 chat_messages 集合索引
-db.chat_messages.createIndex({ "sessionId": 1, "sequence": 1 }, { name: "session_sequence_idx" });
-db.chat_messages.createIndex({ "sessionId": 1, "timestamp": -1 }, { name: "session_time_idx" });
-db.chat_messages.createIndex({ "userId": 1, "timestamp": -1 }, { name: "user_time_idx" });
+// 4. 消息集合索引（保证聊天加载速度）
+db.chat_messages.createIndex({ "sessionId": 1, "sequence": 1 });
+db.chat_messages.createIndex({ "sessionId": 1, "timestamp": -1 });
+db.chat_messages.createIndex({ "userId": 1, "timestamp": -1 });
 
-// 可选：为已归档会话创建 TTL 索引（30天后自动删除）
-// db.chat_sessions.createIndex(
-//   { "updatedAt": 1 },
-//   { 
-//     expireAfterSeconds: 2592000, // 30天
-//     partialFilterExpression: { status: "archived" },
-//     name: "archived_ttl_idx"
-//   }
-// );
+// 5. 自动清理已归档会话（30天自动删除）
+db.chat_sessions.createIndex(
+  { "updatedAt": 1 },
+  {
+    expireAfterSeconds: 2592000, // 30天
+    partialFilterExpression: { status: "archived" }
+  }
+);
 
-print("MongoDB 初始化完成 - patent_chat 数据库索引已创建");
+print("✅ MongoDB 初始化完成：数据库 patent_chat 已就绪");

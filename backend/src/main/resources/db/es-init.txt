@@ -1,0 +1,95 @@
+PUT patent_index
+{
+  "settings": {
+    "number_of_shards": 3,
+    "number_of_replicas": 1,
+    "refresh_interval": "5s",
+    "analysis": {
+      "analyzer": {
+        "ik_max_analyzer": {
+          "type": "custom",
+          "tokenizer": "ik_max_word",
+          "filter": ["lowercase"]
+        },
+        "ik_smart_analyzer": {
+          "type": "custom",
+          "tokenizer": "ik_smart",
+          "filter": ["lowercase"]
+        }
+      }
+    },
+    "index": {
+      "max_result_window": 10000
+    }
+  },
+  "mappings": {
+    "properties": {
+      "id": {
+        "type": "keyword"
+      },
+      "publication_no": {
+        "type": "keyword"
+      },
+      "title": {
+        "type": "text",
+        "analyzer": "ik_max_analyzer",
+        "search_analyzer": "ik_smart_analyzer",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 512
+          }
+        }
+      },
+      "abstract_text": {
+        "type": "text",
+        "analyzer": "ik_max_analyzer",
+        "search_analyzer": "ik_smart_analyzer"
+      },
+      "applicant": {
+        "type": "keyword",
+        "fields": {
+          "text": {
+            "type": "text",
+            "analyzer": "ik_smart_analyzer"
+          }
+        }
+      },
+      "publication_date": {
+        "type": "date",
+        "format": "yyyy-MM-dd||yyyy/MM/dd||epoch_millis"
+      },
+      "domain_codes": {
+        "type": "keyword"
+      },
+      "domain_section": {
+        "type": "keyword"
+      },
+      "entities": {
+        "type": "text",
+        "analyzer": "ik_max_analyzer",
+        "search_analyzer": "ik_smart_analyzer",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "entity_types": {
+        "type": "keyword"
+      },
+      "parse_status": {
+        "type": "keyword"
+      },
+      "source_type": {
+        "type": "keyword"
+      },
+      "created_at": {
+        "type": "date"
+      },
+      "updated_at": {
+        "type": "date"
+      }
+    }
+  }
+}
